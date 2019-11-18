@@ -34,6 +34,10 @@ public class RWGPSBikeFlagEncoder extends BikeFlagEncoder {
 
     @Override
     public String toString() {
-        return "rwgpsbike";
+        // Register as vehicle=bike.
+
+        // This will totally break if both this class (RWGPSBikeFlagEncoder/"rwgpsbike")
+        // and its superclass (BikeFlagEncoder/"bike") are both listed in the config file.
+        return "bike";
     }
 }
