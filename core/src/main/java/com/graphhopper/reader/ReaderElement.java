@@ -110,7 +110,13 @@ public abstract class ReaderElement {
      * Check that the object has a given tag with a given value.
      */
     public boolean hasTag(String key, Object value) {
-        return value.equals(getTag(key, ""));
+        String[] parts = getTag(key, "").split(";");
+        for (String part : parts) {
+            if (value.equals(part)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /**
@@ -118,18 +124,27 @@ public abstract class ReaderElement {
      * for presence of the tag
      */
     public boolean hasTag(String key, String... values) {
-        Object value = properties.get(key);
-        if (value == null)
+        String tag = getTag(key);
+
+        // tag missing: fail
+        if (tag == null) {
             return false;
+        }
 
         // tag present, no values given: success
-        if (values.length == 0)
+        if (values.length == 0) {
             return true;
-
-        for (String val : values) {
-            if (val.equals(value))
-                return true;
         }
+
+        String[] parts = tag.split(";");
+        for (String part : parts) {
+            for (String val : values) {
+                if (val.equals(part)) {
+                    return true;
+                }
+            }
+        }
+
         return false;
     }
 
@@ -137,7 +152,13 @@ public abstract class ReaderElement {
      * Check that a given tag has one of the specified values.
      */
     public final boolean hasTag(String key, Set<String> values) {
-        return values.contains(getTag(key, ""));
+        String[] parts = getTag(key, "").split(";");
+        for (String part : parts) {
+            if (values.contains(part)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /**
@@ -146,8 +167,9 @@ public abstract class ReaderElement {
      */
     public boolean hasTag(List<String> keyList, Set<String> values) {
         for (String key : keyList) {
-            if (values.contains(getTag(key, "")))
+            if (hasTag(key, values)) {
                 return true;
+            }
         }
         return false;
     }

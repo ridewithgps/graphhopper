@@ -35,6 +35,12 @@ public class OSMElementTest {
         instance.setTag("surface", "something");
         assertTrue(instance.hasTag("surface", "now", "something"));
         assertFalse(instance.hasTag("surface", "now", "not"));
+        instance.setTag("foo", "bar;baz");
+        assertTrue(instance.hasTag("foo", "bar"));
+        assertTrue(instance.hasTag("foo", "baz"));
+        assertTrue(instance.hasTag("foo", "bar", "baz"));
+        assertTrue(instance.hasTag("foo", "bar", "bam"));
+        assertFalse(instance.hasTag("foo", "bam"));
     }
 
     @Test
