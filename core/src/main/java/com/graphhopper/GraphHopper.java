@@ -942,7 +942,7 @@ public class GraphHopper implements GraphHopperAPI {
         }
 
         if (weighting == null)
-            throw new IllegalArgumentException("weighting " + weightingStr + " not supported");
+            throw new IllegalArgumentException("weighting " + weightingStr + " not supported" + " for vehicle " + encoder.toString());
 
         if (hintsMap.has(Routing.BLOCK_AREA)) {
             String blockAreaStr = hintsMap.get(Parameters.Routing.BLOCK_AREA, "");
