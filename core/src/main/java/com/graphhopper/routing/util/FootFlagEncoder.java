@@ -24,6 +24,7 @@ import com.graphhopper.routing.profiles.DecimalEncodedValue;
 import com.graphhopper.routing.profiles.EncodedValue;
 import com.graphhopper.routing.profiles.UnsignedDecimalEncodedValue;
 import com.graphhopper.routing.weighting.PriorityWeighting;
+import com.graphhopper.routing.weighting.RWGPSWeighting;
 import com.graphhopper.storage.IntsRef;
 import com.graphhopper.util.PMap;
 
@@ -369,7 +370,7 @@ public class FootFlagEncoder extends AbstractFlagEncoder {
         if (super.supports(feature))
             return true;
 
-        return PriorityWeighting.class.isAssignableFrom(feature);
+        return PriorityWeighting.class.isAssignableFrom(feature) && feature != RWGPSWeighting.class;
     }
 
     /*

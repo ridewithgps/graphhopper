@@ -926,6 +926,14 @@ public class GraphHopper implements GraphHopperAPI {
 
         if (encoder.supports(GenericWeighting.class)) {
             weighting = new GenericWeighting((DataFlagEncoder) encoder, hintsMap);
+        } else if ("rwgps".equalsIgnoreCase(weightingStr)) {
+            if (encoder.supports(RWGPSWeighting.class)) {
+                weighting = new RWGPSWeighting(encoder, hintsMap);
+            } else if (encoder.supports(PriorityWeighting.class)) {
+                weighting = new PriorityWeighting(encoder, hintsMap);
+            } else {
+                weighting = new FastestWeighting(encoder);
+            }
         } else if ("shortest".equalsIgnoreCase(weightingStr)) {
             weighting = new ShortestWeighting(encoder);
         } else if ("fastest".equalsIgnoreCase(weightingStr) || weightingStr.isEmpty()) {
