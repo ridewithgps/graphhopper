@@ -36,6 +36,10 @@ public class RWGPSBikeFlagEncoder extends BikeFlagEncoder {
                                                                                       ));
     }
 
+    protected DecimalEncodedValue getPriorityEncoder() {
+        return priorityEncoder;
+    }
+
     @Override
     void handleBikeRelated(IntsRef edgeFlags, ReaderWay way, boolean partOfCycleRelation) {
         super.handleBikeRelated(edgeFlags, way, partOfCycleRelation);
