@@ -55,6 +55,11 @@ public class RWGPSBikeFlagEncoder extends BikeFlagEncoder {
             cost = 2.5;
         }
 
+        // encourage riding on cycling networks
+        if (partOfCycleRelation) {
+            cost *= 0.8;
+        }
+
         // massively penalize mountain bike paths
         if (way.hasTag("mtb:scale") || way.hasTag("mtb")) {
             cost *= 10;
