@@ -30,7 +30,7 @@ public class RWGPSBikeFlagEncoder extends BikeFlagEncoder {
         super.createEncodedValues(registerNewEncodedValue, prefix, index);
         registerNewEncodedValue.add(priorityEncoder = new UnsignedDecimalEncodedValue(EncodingManager.getKey(prefix, "bikepriority"), // name
                                                                                       31,                                             // bits
-                                                                                      PriorityCode.getFactor(1),                      // factor
+                                                                                      1e-5,                                           // factor
                                                                                       1,                                              // default value
                                                                                       false                                           // store in two directions
                                                                                       ));
