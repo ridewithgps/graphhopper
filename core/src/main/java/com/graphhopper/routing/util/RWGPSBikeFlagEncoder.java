@@ -48,13 +48,10 @@ public class RWGPSBikeFlagEncoder extends BikeFlagEncoder {
             cost = 0.35;
         } else if (isSharedBikeLane(way)) {
             cost = 0.40;
-        } else if ((way.hasTag("highway", "motorway")) || (way.hasTag("highway", "trunk"))) {
+        } else if (way.hasTag("highway", "motorway", "trunk")) {
             cost = 2.5;
-        } else if ((way.hasTag("highway", "path")) && !(way.hasTag("bicycle", "designated") ||
-                                                        way.hasTag("bicycle", "official"))) {
-            cost = 2.5;
-        } else if ((way.hasTag("highway", "track")) && !(way.hasTag("bicycle", "designated") ||
-                                                         way.hasTag("bicycle", "official"))) {
+        } else if (way.hasTag("highway", "path", "track") &&
+                   !way.hasTag("bicycle", "designated", "official")) {
             cost = 2.5;
         }
 
@@ -139,7 +136,7 @@ public class RWGPSBikeFlagEncoder extends BikeFlagEncoder {
     static boolean isBikePath(ReaderWay way) {
         return way.hasTag("highway", "cycleway")
             || (way.hasTag("highway", "footway") && way.hasTag("bicycle", "yes"))
-            || (way.hasTag("highway", "path") && way.hasTag("bicycle", "designated"))
+            || (way.hasTag("highway", "path") && way.hasTag("bicycle", "designated", "official"))
             || (way.hasTag("highway", "service") && way.hasTag("bicycle", "designated"));
     }
 
