@@ -17,6 +17,23 @@ body {
     /*padding-right: 15px; */
 }
 
+#legend dl {
+    display: flex;
+    flex-flow: row wrap;
+}
+
+#legend dt {
+    flex: 0 0 13px;
+    width: 10%
+}
+
+#legend dd {
+    margin-left: 3px;
+    text-align: left;
+    width: 91%;
+    flex: auto;
+}
+
 #info {
     margin-top: 10px;
     display: none;

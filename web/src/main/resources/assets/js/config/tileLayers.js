@@ -80,6 +80,7 @@ var esriAerial = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/servic
 });
 
 var availableTileLayers = {
+    "None": L.tileLayer(""),
     "RWGPS": rwgps,
     "Omniscale": omniscale,
     "OpenStreetMap": osm,
@@ -104,7 +105,7 @@ if(ghenv.environment === 'development') {
     availableTileLayers["Omniscale Dev"] = omniscaleGray;
 
     require('leaflet.vectorgrid');
-    var vtLayer = L.vectorGrid.protobuf("/mvt/{z}/{x}/{y}.mvt?details=max_speed&details=road_class&details=road_environment", {
+    var vtLayer = L.vectorGrid.protobuf("/mvt/{z}/{x}/{y}.mvt?details=max_speed&details=road_class&details=road_environment&details=surface", {
       rendererFactory: L.canvas.tile,
       maxZoom: 20,
       minZoom: 10,
@@ -113,18 +114,20 @@ if(ghenv.environment === 'development') {
         'roads': function(properties, zoom) {
             // weight == line width
             var color, opacity = 1, weight = 1, rc = properties.road_class;
-            // if(properties.speed < 30) console.log(properties)
+            var s = properties.surface;
+
+            if (s == "asphalt" || s == "paved" || s == "concrete") {
+                color = "grey";
+            } else {
+                color = "orange";
+            }
+
             if(rc == "motorway") {
-                color = '#dd504b'; // red
                 weight = 3;
             } else if(rc == "primary" || rc == "trunk") {
-                color = '#e2a012'; // orange
                 weight = 2;
             } else if(rc == "secondary") {
                 weight = 2;
-                color = '#f7c913'; // yellow
-            } else {
-                color = "#aaa5a7"; // grey
             }
             if(zoom > 16)
                weight += 3;
@@ -179,4 +182,21 @@ module.exports.selectLayer = function (layerName) {
         defaultLayer = module.exports.defaultLayer;
 
     return defaultLayer;
+};
+
+module.exports.overlayChange = function (event) {
+    if (event.type == "overlayadd" && event.name == "Local MVT") {
+        var legend = $("#legend");
+        legend.empty();
+        legend.append($("<dl>"));
+
+        var dl = $("#legend dl");
+        dl.append($('<dt style="background-color: grey"></dt>'));
+        dl.append($("<dd>asphalt | paved | concrete</dd>"));
+
+        dl.append($('<dt style="background-color: orange"></dt>'));
+        dl.append($("<dd>everything else</dd>"));
+    } else if (event.type == "overlayremove") {
+        $("#legend").empty();
+    }
 };
