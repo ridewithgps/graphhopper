@@ -16,6 +16,10 @@ var osmAttr = '&copy; <a href="http://www.openstreetmap.org/copyright" target="_
 // Automatically enable high-DPI tiles if provider and browser support it.
 var retinaTiles = L.Browser.retina;
 
+var rwgps = L.tileLayer('https://tile.ridewithgps.com/rwgps/' + '/{z}/{x}/{y}.png', {
+    attribution: osmAttr + ', RWGPS'
+});
+
 var lyrk = L.tileLayer('https://tiles.lyrk.org/' + (retinaTiles ? 'lr' : 'ls') + '/{z}/{x}/{y}?apikey=6e8cfef737a140e2a58c8122aaa26077', {
     attribution: osmAttr + ', <a href="https://geodienste.lyrk.de/">Lyrk</a>'
 });
@@ -76,6 +80,7 @@ var esriAerial = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/servic
 });
 
 var availableTileLayers = {
+    "RWGPS": rwgps,
     "Omniscale": omniscale,
     "OpenStreetMap": osm,
     "Esri Aerial": esriAerial,
@@ -157,8 +162,8 @@ if(ghenv.environment === 'development') {
     overlays = { "Local MVT": vtLayer };
 }
 
-module.exports.activeLayerName = "Omniscale";
-module.exports.defaultLayer = omniscale;
+module.exports.activeLayerName = "rwgps";
+module.exports.defaultLayer = rwgps;
 
 module.exports.getAvailableTileLayers = function () {
     return availableTileLayers;
