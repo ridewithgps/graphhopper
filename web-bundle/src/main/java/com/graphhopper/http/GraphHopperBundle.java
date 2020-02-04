@@ -214,6 +214,7 @@ public class GraphHopperBundle implements ConfiguredBundle<GraphHopperBundleConf
             }
         });
         environment.jersey().register(NearestResource.class);
+        environment.jersey().register(SurfaceInjectorResource.class);
         environment.jersey().register(GraphHopperGtfs.class);
         environment.jersey().register(new PtIsochroneResource(gtfsStorage, encodingManager, graphHopperStorage, locationIndex));
         environment.jersey().register(I18NResource.class);
@@ -270,6 +271,7 @@ public class GraphHopperBundle implements ConfiguredBundle<GraphHopperBundleConf
 
         environment.jersey().register(MVTResource.class);
         environment.jersey().register(NearestResource.class);
+        environment.jersey().register(SurfaceInjectorResource.class);
         environment.jersey().register(RouteResource.class);
         environment.jersey().register(IsochroneResource.class);
         environment.jersey().register(SPTResource.class);
