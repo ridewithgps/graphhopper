@@ -80,6 +80,7 @@ var esriAerial = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/servic
 });
 
 var availableTileLayers = {
+    "None": L.tileLayer(""),
     "RWGPS": rwgps,
     "Omniscale": omniscale,
     "OpenStreetMap": osm,
@@ -94,6 +95,20 @@ var availableTileLayers = {
     "Sorbian Language": sorbianLang,
     "OpenStreetMap.de": osmde
 };
+
+function perc2color(perc) {
+    var r, g, b = 0;
+    if(perc < 50) {
+        r = 255;
+        g = Math.round(5.1 * perc);
+    }
+    else {
+        g = 255;
+        r = Math.round(510 - 5.10 * perc);
+    }
+    var h = r * 0x10000 + g * 0x100 + b * 0x1;
+    return '#' + ('000000' + h.toString(16)).slice(-6);
+}
 
 var overlays;
 module.exports.enableVectorTiles = function () {
@@ -113,25 +128,38 @@ module.exports.enableVectorTiles = function () {
         'roads': function(properties, zoom) {
             // weight == line width
             var color, opacity = 1, weight = 1, rc = properties.road_class;
-            // if(properties.speed < 30) console.log(properties)
+            var popularity = properties.popularity;
+
             if(rc == "motorway") {
-                color = '#dd504b'; // red
                 weight = 3;
             } else if(rc == "primary" || rc == "trunk") {
-                color = '#e2a012'; // orange
                 weight = 2;
             } else if(rc == "secondary") {
                 weight = 2;
-                color = '#f7c913'; // yellow
-            } else {
-                color = "#aaa5a7"; // grey
             }
+
             if(zoom > 16)
                weight += 3;
             else if(zoom > 15)
                weight += 2;
             else if(zoom > 13)
-               weight += 1;
+                weight += 1;
+
+            if (popularity == 1) {
+                color = "black";
+            } else if (popularity > 100) {
+                color = "purple";
+            } else {
+                color = perc2color(popularity);
+            }
+
+            // if (popularity == 1) {
+            //     color = "grey";
+            // } else if (popularity <= 5) {
+            //     color = "yellow";
+            // } else {
+            //     color = "orange";
+            // }
 
             return {
                 weight: weight,

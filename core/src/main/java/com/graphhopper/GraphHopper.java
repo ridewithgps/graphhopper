@@ -47,6 +47,7 @@ import com.graphhopper.routing.util.parsers.TagParserFactory;
 import com.graphhopper.routing.weighting.*;
 import com.graphhopper.storage.*;
 import com.graphhopper.storage.index.LocationIndex;
+import com.graphhopper.storage.index.PopularityIndex;
 import com.graphhopper.storage.index.LocationIndexTree;
 import com.graphhopper.storage.index.QueryResult;
 import com.graphhopper.util.*;
@@ -101,6 +102,8 @@ public class GraphHopper implements GraphHopperAPI {
     private final RoutingConfig routingConfig = new RoutingConfig();
     // for index
     private LocationIndex locationIndex;
+    private PopularityIndex popularityIndex;
+    private java.nio.file.Path popularityIndexSourceDirectory;
     private int preciseIndexResolution = 300;
     private int maxRegionSearch = 4;
     // for prepare
@@ -131,6 +134,7 @@ public class GraphHopper implements GraphHopperAPI {
         this.ghStorage = g;
         setFullyLoaded();
         initLocationIndex();
+        initPopularityIndex();
         return this;
     }
 
@@ -436,6 +440,13 @@ public class GraphHopper implements GraphHopperAPI {
         this.locationIndex = locationIndex;
     }
 
+    public PopularityIndex getPopularityIndex() {
+        if (popularityIndex == null)
+            throw new IllegalStateException("Popularity index not initialized");
+
+        return popularityIndex;
+    }
+
     /**
      * Sorts the graph which requires more RAM while import. See #12
      */
@@ -590,6 +601,8 @@ public class GraphHopper implements GraphHopperAPI {
         String cacheDirStr = ghConfig.getString("graph.elevation.cache_dir", "");
         if (cacheDirStr.isEmpty())
             cacheDirStr = ghConfig.getString("graph.elevation.cachedir", "");
+
+        popularityIndexSourceDirectory = java.nio.file.Paths.get(args.get("graph.popularity.source_directory", ""));
 
         String baseURL = ghConfig.getString("graph.elevation.base_url", "");
         if (baseURL.isEmpty())
@@ -758,6 +771,7 @@ public class GraphHopper implements GraphHopperAPI {
 
         setGraphHopperLocation(graphHopperFolder);
 
+
         if (encodingManager == null)
             setEncodingManager(EncodingManager.create(encodedValueFactory, flagEncoderFactory, ghLocation));
 
@@ -907,14 +921,14 @@ public class GraphHopper implements GraphHopperAPI {
     }
 
     /**
-     * Does the preparation and creates the location index
+     * Does the preparation and creates the location and popularity indexes
      */
     public final void postProcessing() {
         postProcessing(false);
     }
 
     /**
-     * Does the preparation and creates the location index
+     * Does the preparation and creates the location and popularity indexes
      *
      * @param closeEarly release resources as early as possible
      */
@@ -938,10 +952,13 @@ public class GraphHopper implements GraphHopperAPI {
 
         initLocationIndex();
 
+        initPopularityIndex();
+
         importPublicTransit();
 
         if (lmPreparationHandler.isEnabled())
             lmPreparationHandler.createPreparations(ghStorage, locationIndex);
+
         loadOrPrepareLM(closeEarly);
 
         if (chPreparationHandler.isEnabled())
@@ -1205,6 +1222,27 @@ public class GraphHopper implements GraphHopperAPI {
         locationIndex = createLocationIndex(ghStorage.getDirectory());
     }
 
+    protected PopularityIndex createPopularityIndex(Directory dir) {
+        PopularityIndex tmpIndex = new PopularityIndex(ghStorage, locationIndex, dir, popularityIndexSourceDirectory);
+        try {
+            if (!tmpIndex.loadExisting()) {
+                ensureWriteAccess();
+                tmpIndex.prepareIndex();
+            }
+        } catch (IOException ex) {
+            throw new RuntimeException("Cannot read something from popularity source directory: " + popularityIndexSourceDirectory, ex);
+        }
+
+        return tmpIndex;
+    }
+
+    protected void initPopularityIndex() {
+        if (popularityIndex != null)
+            throw new IllegalStateException("Cannot initialize popularityIndex twice!");
+
+        popularityIndex = createPopularityIndex(ghStorage.getDirectory());
+    }
+
     private boolean isCHPrepared() {
         return "true".equals(ghStorage.getProperties().get(CH.PREPARE + "done"))
                 // remove old property in >0.9
@@ -1223,6 +1261,8 @@ public class GraphHopper implements GraphHopperAPI {
             if (closeEarly) {
                 locationIndex.flush();
                 locationIndex.close();
+                popularityIndex.flush();
+                popularityIndex.close();
                 ghStorage.flushAndCloseEarly();
             }
 
@@ -1279,6 +1319,9 @@ public class GraphHopper implements GraphHopperAPI {
 
         if (locationIndex != null)
             locationIndex.close();
+
+        if (popularityIndex != null)
+            popularityIndex.close();
 
         try {
             lockFactory.forceRemove(fileLockName, true);
