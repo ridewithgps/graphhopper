@@ -66,6 +66,10 @@ import java.io.File;
 import java.io.IOException;
 import java.text.DateFormat;
 import java.util.*;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.locks.Lock;
+import java.util.concurrent.locks.ReadWriteLock;
+import java.util.concurrent.locks.ReentrantReadWriteLock;
 
 import static com.graphhopper.routing.weighting.TurnCostProvider.NO_TURN_COST_PROVIDER;
 import static com.graphhopper.routing.weighting.Weighting.INFINITE_U_TURN_COSTS;
@@ -1229,7 +1233,7 @@ public class GraphHopper implements GraphHopperAPI {
                 ensureWriteAccess();
                 tmpIndex.prepareIndex();
             }
-        } catch (IOException ex) {
+        } catch (IOException | InterruptedException | ExecutionException ex) {
             throw new RuntimeException("Cannot read something from popularity source directory: " + popularityIndexSourceDirectory, ex);
         }
 
