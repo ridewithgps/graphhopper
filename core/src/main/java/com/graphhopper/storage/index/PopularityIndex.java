@@ -34,7 +34,7 @@ public class PopularityIndex implements Storable<PopularityIndex> {
     private final Logger logger = LoggerFactory.getLogger(getClass());
     private final static int MAGIC_INT = Integer.MAX_VALUE / 112121;
     private final static int MAX_DISTANCE_METERS = 5;
-    private final static int REPORT_INTERVAL = 10;
+    private final static int REPORT_INTERVAL = 100;
     private final Graph graph;
     private final LocationIndex locationIndex;
     private final DataAccess index;
@@ -191,14 +191,13 @@ public class PopularityIndex implements Storable<PopularityIndex> {
         }
 
         public Map<Integer, Integer> call() throws IOException {
-            logger.debug("<" + java.lang.Thread.currentThread().getName() + "> Starting file:" + this.file);
-
             final ObjectMapper mapper = new ObjectMapper();
             final JsonNode root = mapper.readTree(file.toFile());
             final JsonNode track_points = root.findValue("track_points");
+            List<EdgeIteratorState> all_edges = new ArrayList<>();
+            final Map<Integer, Integer> popularityTally = new HashMap<>();
 
             // create list of all nearby edges
-            List<PopularityEdge> all_edges = new ArrayList<>();
             for (JsonNode point : track_points) {
                 final JsonNode y = point.findValue("y");
                 final JsonNode x = point.findValue("x");
@@ -206,86 +205,30 @@ public class PopularityIndex implements Storable<PopularityIndex> {
                 if (y != null && x != null && y.isDouble() && x.isDouble()) {
                     QueryResult qr = locationIndex.findClosest(y.asDouble(), x.asDouble(), EdgeFilter.ALL_EDGES);
                     if (qr.isValid() && qr.getQueryDistance() < MAX_DISTANCE_METERS) {
-                        all_edges.add(new PopularityEdge(qr.getClosestEdge()));
+                        all_edges.add(qr.getClosestEdge());
                     }
                 }
             }
 
             // find edges with more than one consecutive point
-            final List<PopularityEdge> selected_edges = new ArrayList<>();
-            PopularityEdge prev_edge = null;
-            PopularityEdge last = null;
-            for (PopularityEdge edge: all_edges) {
-                if (prev_edge != null && edge.equals(prev_edge) && !edge.equals(last)) {
-                    selected_edges.add(edge);
-                    last = edge;
-                }
-                prev_edge = edge;
-            }
+            Integer prev_edge = null;
+            Integer last = null;
+            for (EdgeIteratorState edge: all_edges) {
+                int id = edge.getEdge();
+                if (prev_edge != null && id == prev_edge && (last == null || id != last)) {
+                    Integer tally = popularityTally.get(id);
 
-            // tally up popularity for each edge
-            final Map<Integer, Integer> popularityTally = new HashMap<>();
-            for (PopularityEdge edge: selected_edges) {
-                Integer popularity = popularityTally.get(edge.getId());
-                if (popularity != null) {
-                    popularity += 1;
-                } else {
-                    popularity = new Integer(1);
+                    if (tally != null) {
+                        popularityTally.put(id, tally + 1);
+                    } else {
+                        popularityTally.put(id, new Integer(1));
+                    }
+                    last = id;
                 }
-                popularityTally.put(edge.getId(), popularity);
+                prev_edge = id;
             }
 
             return popularityTally;
-        }
-    }
-
-    private class PopularityEdge {
-        private final EdgeIteratorState edge;
-
-        public PopularityEdge(EdgeIteratorState edge) {
-            this.edge = edge;
-        }
-
-        public int getId() {
-            return this.edge.getEdge();
-        }
-
-        public double getDistance() {
-            return this.edge.getDistance();
-        }
-
-        public String getName() {
-            return this.edge.getName();
-        }
-
-        @Override
-        public int hashCode() {
-            return Objects.hashCode(this.edge.getEdge());
-        }
-
-        @Override
-        public boolean equals(Object o) {
-            if (this == o) {
-                return true;
-            }
-
-            if (o == null) {
-                return false;
-            }
-
-            if (this.getClass() != o.getClass()) {
-                return false;
-            }
-
-            return Objects.equals(this.getId(), ((PopularityEdge)o).getId());
-        }
-
-        @Override
-        public String toString() {
-            return String.format(Locale.ROOT,
-                                 "Edge<%s, %s>",
-                                 this.getId(),
-                                 this.getName());
         }
     }
 }
