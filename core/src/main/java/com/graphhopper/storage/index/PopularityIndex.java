@@ -16,6 +16,7 @@ import com.graphhopper.util.StopWatch;
 import com.graphhopper.storage.Storable;
 import java.io.*;
 import java.util.*;
+import java.util.zip.GZIPInputStream;
 import java.nio.file.attribute.BasicFileAttributes;
 import java.nio.file.Files;
 import java.nio.file.FileVisitResult;
@@ -191,44 +192,59 @@ public class PopularityIndex implements Storable<PopularityIndex> {
         }
 
         public Map<Integer, Integer> call() throws IOException {
-            final ObjectMapper mapper = new ObjectMapper();
-            final JsonNode root = mapper.readTree(file.toFile());
-            final JsonNode track_points = root.findValue("track_points");
-            List<EdgeIteratorState> all_edges = new ArrayList<>();
-            final Map<Integer, Integer> popularityTally = new HashMap<>();
+            String content_type = Files.probeContentType(this.file);
+            InputStream source = null;
 
-            // create list of all nearby edges
-            for (JsonNode point : track_points) {
-                final JsonNode y = point.findValue("y");
-                final JsonNode x = point.findValue("x");
+            try {
+                if (content_type != null && content_type.equals("application/gzip")) {
+                    source = new GZIPInputStream(new FileInputStream(file.toFile()));
+                } else {
+                    source = new FileInputStream(file.toFile());
+                }
 
-                if (y != null && x != null && y.isDouble() && x.isDouble()) {
-                    QueryResult qr = locationIndex.findClosest(y.asDouble(), x.asDouble(), EdgeFilter.ALL_EDGES);
-                    if (qr.isValid() && qr.getQueryDistance() < MAX_DISTANCE_METERS) {
-                        all_edges.add(qr.getClosestEdge());
+                final ObjectMapper mapper = new ObjectMapper();
+                final JsonNode root = mapper.readTree(source);
+                final JsonNode track_points = root.findValue("track_points");
+                List<EdgeIteratorState> all_edges = new ArrayList<>();
+                final Map<Integer, Integer> popularityTally = new HashMap<>();
+
+                // create list of all nearby edges
+                for (JsonNode point : track_points) {
+                    final JsonNode y = point.findValue("y");
+                    final JsonNode x = point.findValue("x");
+
+                    if (y != null && x != null && y.isDouble() && x.isDouble()) {
+                        QueryResult qr = locationIndex.findClosest(y.asDouble(), x.asDouble(), EdgeFilter.ALL_EDGES);
+                        if (qr.isValid() && qr.getQueryDistance() < MAX_DISTANCE_METERS) {
+                            all_edges.add(qr.getClosestEdge());
+                        }
                     }
                 }
-            }
 
-            // find edges with more than one consecutive point
-            Integer prev_edge = null;
-            Integer last = null;
-            for (EdgeIteratorState edge: all_edges) {
-                int id = edge.getEdge();
-                if (prev_edge != null && id == prev_edge && (last == null || id != last)) {
-                    Integer tally = popularityTally.get(id);
+                // find edges with more than one consecutive point
+                Integer prev_edge = null;
+                Integer last = null;
+                for (EdgeIteratorState edge: all_edges) {
+                    int id = edge.getEdge();
+                    if (prev_edge != null && id == prev_edge && (last == null || id != last)) {
+                        Integer tally = popularityTally.get(id);
 
-                    if (tally != null) {
-                        popularityTally.put(id, tally + 1);
-                    } else {
-                        popularityTally.put(id, new Integer(1));
+                        if (tally != null) {
+                            popularityTally.put(id, tally + 1);
+                        } else {
+                            popularityTally.put(id, new Integer(1));
+                        }
+                        last = id;
                     }
-                    last = id;
+                    prev_edge = id;
                 }
-                prev_edge = id;
-            }
 
-            return popularityTally;
+                return popularityTally;
+            } finally {
+                if (source != null) {
+                    source.close();
+                }
+            }
         }
     }
 }
