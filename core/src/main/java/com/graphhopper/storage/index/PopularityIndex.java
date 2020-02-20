@@ -10,9 +10,12 @@ import com.graphhopper.storage.Directory;
 import com.graphhopper.storage.Graph;
 import com.graphhopper.storage.index.QueryResult;
 import com.graphhopper.routing.util.EdgeFilter;
+import com.graphhopper.util.EdgeIterator;
 import com.graphhopper.util.EdgeIteratorState;
 import com.graphhopper.util.Helper;
 import com.graphhopper.util.StopWatch;
+import com.graphhopper.util.PointList;
+import com.graphhopper.util.shapes.GHPoint3D;
 import com.graphhopper.storage.Storable;
 import java.io.*;
 import java.util.*;
@@ -30,6 +33,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Future;
+import com.github.davidmoten.geo.GeoHash;
 
 public class PopularityIndex implements Storable<PopularityIndex> {
     private final Logger logger = LoggerFactory.getLogger(getClass());
@@ -40,6 +44,7 @@ public class PopularityIndex implements Storable<PopularityIndex> {
     private final LocationIndex locationIndex;
     private final DataAccess index;
     private final Path track_dir;
+    private HashMap<String, Integer> buckets = new HashMap<>();
 
     public PopularityIndex(Graph graph, LocationIndex locationIndex, Directory dir, Path track_dir) {
         if (graph instanceof CHGraph) {
@@ -55,51 +60,59 @@ public class PopularityIndex implements Storable<PopularityIndex> {
     }
 
     public PopularityIndex prepareIndex() throws IOException, InterruptedException, ExecutionException {
-        index.create(this.graph.getEdges() * 4);
+        final int indexSize = this.graph.getEdges() * 4;
+        index.setSegmentSize(indexSize);
+        index.create(indexSize);
+        loadPopularityBuckets();
         loadData();
+        emptyPopularityBuckets();
         flush();
         return this;
     }
 
+    void loadPopularityBuckets() throws IOException {
+        final ObjectMapper mapper = new ObjectMapper();
+        final JsonNode root = mapper.readTree(this.track_dir.toFile());
+
+        Iterator<String> fieldNameIter = root.fieldNames();
+        while (fieldNameIter.hasNext()) {
+            String bucket = fieldNameIter.next();
+            int popularity = root.get(bucket).asInt();
+            this.buckets.put(bucket, popularity);
+        }
+    }
+
+    void emptyPopularityBuckets() {
+        // free up RAM after the index is constructed
+        this.buckets = null;
+    }
+
     void loadData() throws IOException, InterruptedException, ExecutionException {
         final StopWatch sw = new StopWatch().start();
-        final ExecutorService executorService = Executors.newFixedThreadPool(Runtime.getRuntime().availableProcessors());
-        final ExecutorCompletionService<Map<Integer, Integer>> completions = new ExecutorCompletionService<>(executorService);
-        final AtomicInteger tasksSubmittedCounter = new AtomicInteger();
+        final int geomFetchMode = 3; // Base tower, all pillars, and adjacent tower
 
-        Files.walkFileTree(track_dir,
-                           new SimpleFileVisitor<Path>() {
-                               @Override
-                               public FileVisitResult visitFile(Path file, BasicFileAttributes attrs) throws IOException {
-                                   completions.submit(new PopularityTask(file));
-                                   tasksSubmittedCounter.incrementAndGet();
-                                   return FileVisitResult.CONTINUE;
-                               }
-                           });
+        EdgeIterator iter =  this.graph.getAllEdges();
+        while (iter.next()) {
+            long edgeId = iter.getEdge();
+            PointList geometry = iter.fetchWayGeometry(geomFetchMode);
+            int tally = 0;
 
-        long edgeTouches = 0;
-        int i;
-        for(i=0; i < tasksSubmittedCounter.get(); i++) {
-            if (i % REPORT_INTERVAL == 0) {
-                logProgress(i, edgeTouches);
+            for (GHPoint3D point: geometry) {
+                String bucket = GeoHash.encodeHash(point.getLat(), point.getLon(), 8);
+
+                // Look up this bucket in the loaded bucket list
+                Integer pointPopularity = this.buckets.get(bucket);
+
+                if (pointPopularity != null) {
+                    // add the score for this point to the tally for this edge
+                    tally += pointPopularity;
+                }
             }
 
-            Future<Map<Integer, Integer>> future = completions.take();
-            Map<Integer, Integer> threadPopularityMap = future.get();
-
-            for (Integer edgeId: threadPopularityMap.keySet()) {
-                this.index.setInt(edgeId, this.index.getInt(edgeId) + threadPopularityMap.get(edgeId));
-                edgeTouches += 1;
+            if (tally > 0) {
+                setRawPopularity(edgeId, getRawPopularity(edgeId) + tally);
             }
         }
-
-        executorService.shutdown();
-
-        final float loadDataSeconds = sw.stop().getSeconds();
-        logger.info(String.format(Locale.ROOT,
-                                  "Building PopularityIndex finished in %s seconds.",
-                                  loadDataSeconds));
-        logProgress(i, edgeTouches, true);
     }
 
     private void logProgress(int i, long edgeTouches) {
@@ -119,9 +132,20 @@ public class PopularityIndex implements Storable<PopularityIndex> {
                                   Helper.getMemInfo()));
     }
 
+    private int setRawPopularity(long edgeId, int value) {
+        this.index.setInt(edgeId * 4, value);
+        return value;
+    }
+
+    private int getRawPopularity(long edgeId) {
+        return this.index.getInt(edgeId * 4);
+    }
+
     public int getPopularity(EdgeIteratorState edge) {
+        long edgeId = edge.getEdge();
+
         // add 1 so that we never return 0 popularity
-        return this.index.getInt(edge.getEdge()) + 1;
+        return getRawPopularity(edgeId) + 1;
     }
 
 
