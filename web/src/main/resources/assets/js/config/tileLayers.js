@@ -145,12 +145,16 @@ module.exports.enableVectorTiles = function () {
             else if(zoom > 13)
                 weight += 1;
 
-            if (popularity == 1) {
+            f = 200;
+            popularity -= f;
+            if (popularity == 1 - f) {
                 color = "black";
-            } else if (popularity > 100) {
-                color = "purple";
-            } else {
+            } else if (popularity <= 0) {
+                color = "grey";
+            } else if (popularity < 100) {
                 color = perc2color(popularity);
+            } else {
+                color = "purple";
             }
 
             // if (popularity == 1) {
