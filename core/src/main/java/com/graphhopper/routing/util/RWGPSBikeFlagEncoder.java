@@ -47,11 +47,11 @@ public class RWGPSBikeFlagEncoder extends BikeFlagEncoder {
         double cost = 0.6;
 
         if (isBikePath(way)) {
-            cost = 0.225;
-        } else if (isBikeLane(way)) {
-            cost = 0.35;
-        } else if (isSharedBikeLane(way)) {
             cost = 0.40;
+        } else if (isBikeLane(way)) {
+            cost = 0.45;
+        } else if (isSharedBikeLane(way)) {
+            cost = 0.50;
         } else if (way.hasTag("highway", "motorway", "trunk")) {
             cost = 2.5;
         } else if (way.hasTag("highway", "path", "track") &&
@@ -61,7 +61,7 @@ public class RWGPSBikeFlagEncoder extends BikeFlagEncoder {
 
         // encourage riding on cycling networks
         if (partOfCycleRelation) {
-            cost *= 0.8;
+            cost *= 0.65;
         }
 
         // discourage riding on MTB trails
