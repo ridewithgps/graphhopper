@@ -50,6 +50,7 @@ import com.graphhopper.storage.index.LocationIndex;
 import com.graphhopper.storage.index.PopularityIndex;
 import com.graphhopper.storage.index.LocationIndexTree;
 import com.graphhopper.storage.index.QueryResult;
+import com.graphhopper.storage.index.EdgeIndex;
 import com.graphhopper.util.*;
 import com.graphhopper.util.Parameters.CH;
 import com.graphhopper.util.Parameters.Landmark;
@@ -107,7 +108,7 @@ public class GraphHopper implements GraphHopperAPI {
     // for index
     private LocationIndex locationIndex;
     private PopularityIndex popularityIndex;
-    private java.nio.file.Path popularityIndexSourceDirectory;
+    private java.nio.file.Path popularityFile;
     private int preciseIndexResolution = 300;
     private int maxRegionSearch = 4;
     // for prepare
@@ -606,7 +607,7 @@ public class GraphHopper implements GraphHopperAPI {
         if (cacheDirStr.isEmpty())
             cacheDirStr = ghConfig.getString("graph.elevation.cachedir", "");
 
-        popularityIndexSourceDirectory = java.nio.file.Paths.get(args.get("graph.popularity.source_directory", ""));
+        popularityFile = java.nio.file.Paths.get(args.get("graph.popularity.file", ""));
 
         String baseURL = ghConfig.getString("graph.elevation.base_url", "");
         if (baseURL.isEmpty())
@@ -729,6 +730,10 @@ public class GraphHopper implements GraphHopperAPI {
     protected DataReader createReader(GraphHopperStorage ghStorage) {
         throw new UnsupportedOperationException("Cannot create DataReader. Solutions: avoid import via calling load directly, "
                 + "provide a DataReader or use e.g. GraphHopperOSM or a different subclass");
+    }
+
+    public EdgeIndex getEdgeIndex() {
+        throw new UnsupportedOperationException("Use GraphHopperOSM, not this class directly.");
     }
 
     protected DataReader initDataReader(DataReader reader) {
@@ -1227,14 +1232,14 @@ public class GraphHopper implements GraphHopperAPI {
     }
 
     protected PopularityIndex createPopularityIndex(Directory dir) {
-        PopularityIndex tmpIndex = new PopularityIndex(ghStorage, locationIndex, dir, popularityIndexSourceDirectory);
+        PopularityIndex tmpIndex = new PopularityIndex(ghStorage, dir, popularityFile, getEdgeIndex());
         try {
             if (!tmpIndex.loadExisting()) {
                 ensureWriteAccess();
                 tmpIndex.prepareIndex();
             }
-        } catch (IOException | InterruptedException | ExecutionException ex) {
-            throw new RuntimeException("Cannot read something from popularity source directory: " + popularityIndexSourceDirectory, ex);
+        } catch (IOException e) {
+            throw new RuntimeException("Error reading from popularity file " + popularityFile , e);
         }
 
         return tmpIndex;

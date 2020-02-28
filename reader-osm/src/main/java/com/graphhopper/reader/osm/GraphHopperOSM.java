@@ -26,6 +26,7 @@ import com.graphhopper.routing.util.spatialrules.SpatialRule;
 import com.graphhopper.routing.util.spatialrules.SpatialRuleLookup;
 import com.graphhopper.routing.util.spatialrules.SpatialRuleLookupBuilder;
 import com.graphhopper.storage.GraphHopperStorage;
+import com.graphhopper.storage.index.EdgeIndex;
 import org.locationtech.jts.geom.Polygon;
 
 import java.util.Collections;
@@ -37,6 +38,8 @@ import java.util.List;
  * @author Peter Karich
  */
 public class GraphHopperOSM extends GraphHopper {
+    private final EdgeIndex edgeIndex = new EdgeIndex();
+
 
     private final JsonFeatureCollection landmarkSplittingFeatureCollection;
 
@@ -51,7 +54,22 @@ public class GraphHopperOSM extends GraphHopper {
 
     @Override
     protected DataReader createReader(GraphHopperStorage ghStorage) {
-        return initDataReader(new OSMReader(ghStorage));
+        return initDataReader(new OSMReader(ghStorage) {
+                @Override
+                protected void storeOsmWayID(int edgeId, long osmWayId) {
+                    super.storeOsmWayID(edgeId, osmWayId);
+                    edgeIndex.put(edgeId, osmWayId);
+                }
+
+                @Override
+                protected void finishedReading() {
+                    super.finishedReading();
+                }
+            });
+    }
+
+    public EdgeIndex getEdgeIndex() {
+        return edgeIndex;
     }
 
     public String getOSMFile() {

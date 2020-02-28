@@ -7,35 +7,35 @@ import com.graphhopper.storage.DataAccess;
 import com.graphhopper.storage.DAType;
 import com.graphhopper.storage.Directory;
 import com.graphhopper.storage.Graph;
+import com.graphhopper.storage.index.EdgeIndex;
 import com.graphhopper.util.EdgeIterator;
 import com.graphhopper.util.EdgeIteratorState;
 import com.graphhopper.util.StopWatch;
-import com.graphhopper.util.PointList;
-import com.graphhopper.util.shapes.GHPoint;
-import com.graphhopper.util.shapes.GHPoint3D;
 import com.graphhopper.storage.Storable;
 import java.io.*;
 import java.util.*;
+import java.util.zip.GZIPInputStream;
 import java.nio.file.Path;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import com.github.davidmoten.geo.GeoHash;
 
 public class PopularityIndex implements Storable<PopularityIndex> {
     private final Logger logger = LoggerFactory.getLogger(getClass());
     private final static int MAGIC_INT = Integer.MAX_VALUE / 112121;
     private final Graph graph;
     private final DataAccess index;
-    private final Path track_dir;
+    private final Path popularityFile;
+    private final EdgeIndex edgeIndex;
 
-    public PopularityIndex(Graph graph, LocationIndex locationIndex, Directory dir, Path track_dir) {
+    public PopularityIndex(Graph graph, Directory dir, Path popularityFile, EdgeIndex edgeIndex) {
         if (graph instanceof CHGraph) {
             throw new IllegalArgumentException("Use base graph for PopularityIndex instead of CHGraph");
         }
 
         this.graph = graph;
         this.index = dir.find("popularity_index", DAType.getPreferredInt(dir.getDefaultType()));
-        this.track_dir = track_dir;
+        this.popularityFile = popularityFile;
+        this.edgeIndex = edgeIndex;
 
         logger.info("Initializing PopularityIndex...");
     }
@@ -51,41 +51,21 @@ public class PopularityIndex implements Storable<PopularityIndex> {
 
     void loadData() throws IOException {
         final StopWatch sw = new StopWatch().start();
-        final BucketInfo bi = new BucketInfo(this.track_dir.toFile());
-        final float elapsed_bi_load = sw.stop().getSeconds();
+        final EdgeInfo ei = new EdgeInfo(this.popularityFile);
+        final float elapsed_ei_load = sw.stop().getSeconds();
         logger.info(String.format(Locale.ROOT,
-                                  "Loading BucketInfo finished in %s seconds.",
-                                  elapsed_bi_load));
-
-
-        final int geomFetchMode = 3; // Base tower, all pillars, and adjacent tower
+                                  "Loading EdgeInfo finished in %s seconds.",
+                                  elapsed_ei_load));
         sw.start();
         EdgeIterator iter =  this.graph.getAllEdges();
         while (iter.next()) {
-            long edgeId = iter.getEdge();
-            PointList geometry = iter.fetchWayGeometry(geomFetchMode);
-            List<Integer> scores = new ArrayList<>();
+            int edgeId = iter.getEdge();
+            long wayId = this.edgeIndex.get(edgeId);
 
-            for (GHPoint3D point: geometry) {
-                Integer pointPopularity = bi.getPopularity(point);
+            Integer popularity = ei.getPopularity(wayId);
 
-                if (pointPopularity != null) {
-                    scores.add(pointPopularity);
-                }
-            }
-
-            int score = 0;
-
-            if (scores.size() > 0) {
-                for (int s: scores) {
-                    score += s;
-                }
-
-                score /= scores.size();
-            }
-
-            if (score > 0) {
-                setRawPopularity(edgeId, score);
+            if (popularity != null && popularity > 0) {
+                setRawPopularity(edgeId, popularity);
             }
         }
         final float elapsed_edge_write = sw.stop().getSeconds();
@@ -170,32 +150,27 @@ public class PopularityIndex implements Storable<PopularityIndex> {
         return index.getCapacity();
     }
 
-    private class BucketInfo {
-        private final int precision;
-        private HashMap<String, Integer> buckets = new HashMap<>();
 
-        public BucketInfo(File inputFile) throws IOException {
-            final ObjectMapper mapper = new ObjectMapper();
-            final JsonNode root = mapper.readTree(inputFile);
+    private class EdgeInfo {
+        private HashMap<Long, Integer> popularities = new HashMap<>();
 
-            this.precision = root.get("precision").asInt();
+        public EdgeInfo(Path input) throws IOException {
+            try (InputStream in = new GZIPInputStream(new FileInputStream(input.toFile()))) {
+                final ObjectMapper mapper = new ObjectMapper();
+                final JsonNode root = mapper.readTree(in);
 
-            final JsonNode bucketsNode = root.get("buckets");
-            Iterator<String> fieldNameIter = bucketsNode.fieldNames();
-            while (fieldNameIter.hasNext()) {
-                String bucket = fieldNameIter.next();
-                int popularity = bucketsNode.get(bucket).asInt();
-                this.buckets.put(bucket, popularity);
+                Iterator<Map.Entry<String, JsonNode>> fieldIter = root.fields();
+                while (fieldIter.hasNext()) {
+                    Map.Entry<String, JsonNode> entry = fieldIter.next();
+                    Long wayId = Long.parseLong(entry.getKey());
+                    int popularity = entry.getValue().asInt();
+                    this.popularities.put(wayId, popularity);
+                }
             }
         }
 
-        public Integer getPopularity(GHPoint point) {
-            String bucket = this.geohash(point);
-            return this.buckets.get(bucket);
-        }
-
-        private String geohash(GHPoint point) {
-            return GeoHash.encodeHash(point.getLat(), point.getLon(), this.precision);
+        public Integer getPopularity(long wayId) {
+            return this.popularities.get(wayId);
         }
     }
 }

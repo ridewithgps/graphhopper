@@ -145,7 +145,7 @@ module.exports.enableVectorTiles = function () {
             else if(zoom > 13)
                 weight += 1;
 
-            f = 200;
+            f = 50;
             popularity -= f;
             if (popularity == 1 - f) {
                 color = "black";

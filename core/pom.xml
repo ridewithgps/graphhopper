@@ -89,12 +89,6 @@
             <artifactId>jackson-databind</artifactId>
             <version>${jackson.version}</version>
         </dependency>
-
-        <dependency>
-          <groupId>com.github.davidmoten</groupId>
-          <artifactId>geo</artifactId>
-          <version>0.7.1</version>
-        </dependency>
     </dependencies>
 
     <build>
