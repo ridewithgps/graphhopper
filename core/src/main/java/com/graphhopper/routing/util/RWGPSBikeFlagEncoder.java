@@ -92,7 +92,7 @@ public class RWGPSBikeFlagEncoder extends BikeFlagEncoder {
 
         // only increase cost from road features if we're riding on the road
         if (!way.hasTag("cycleway", "track") && !isBikePath(way)) {
-            // increase cost if number of lanes greater than two
+            // increase cost for too many lanes
             double lanes = getLanes(way);
             if (lanes > 3) {
                 cost += 0.05;
