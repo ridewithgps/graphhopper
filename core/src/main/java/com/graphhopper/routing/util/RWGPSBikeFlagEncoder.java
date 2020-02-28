@@ -64,13 +64,29 @@ public class RWGPSBikeFlagEncoder extends BikeFlagEncoder {
             cost *= 0.8;
         }
 
-        // massively penalize mountain bike paths
-        if (way.hasTag("mtb:scale")) {
-            cost *= 10;
+        // discourage riding on MTB trails
+        String mtbScale = way.getTag("mtb:scale");
+        if (mtbScale != null) {
+            double mtbFactor = 1;
+
+            if (mtbScale.equals("0-")) {
+                mtbFactor = 1.1;
+            } else if (mtbScale.equals("0")) {
+                mtbFactor = 1.75;
+            } else if (mtbScale.equals("0+")) {
+                // same penalty as RLIS:bicycle=caution_area
+                mtbFactor = 2;
+            } else {
+                // large penalty to all other types
+                mtbFactor = 10;
+            }
+
+            cost *= mtbFactor;
         }
 
         // penalize bike caution_area
         if (way.hasTag("RLIS:bicycle", "caution_area")) {
+            // same penalty as mtb:scale=0+
             cost *= 2;
         }
 
