@@ -52,6 +52,17 @@ public class RWGPSBikeFlagEncoder extends BikeFlagEncoder {
             cost = 0.45;
         } else if (isSharedBikeLane(way)) {
             cost = 0.50;
+        } else if (way.hasTag("highway", "track")) {
+            if (way.hasTag("tracktype", "grade1")) {
+                cost = 0.50;
+            } else if (way.hasTag("tracktype", "grade2")) {
+                cost = 0.525;
+            } else if (way.hasTag("tracktype", "grade3")) {
+                cost = 0.70;
+            } else {
+                // this includes grades 4, 5, and no value for tracktype
+                cost = 2.0;
+            }
         } else if (way.hasTag("highway", "motorway", "trunk")) {
             cost = 2.5;
         } else if (way.hasTag("highway", "path", "track") &&
