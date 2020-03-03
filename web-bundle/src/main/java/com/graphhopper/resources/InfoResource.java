@@ -19,6 +19,9 @@ package com.graphhopper.resources;
 
 import com.graphhopper.GraphHopperConfig;
 import com.graphhopper.storage.GraphHopperStorage;
+import com.graphhopper.storage.CHProfile;
+import com.graphhopper.routing.weighting.Weighting;
+import com.graphhopper.routing.util.FlagEncoder;
 import com.graphhopper.util.Constants;
 import com.graphhopper.util.shapes.BBox;
 
@@ -52,6 +55,7 @@ public class InfoResource {
         public static class PerVehicle {
             public boolean elevation;
             public boolean turn_costs;
+            public List<String> weightings;
         }
 
         public BBox bbox;
@@ -70,19 +74,26 @@ public class InfoResource {
         final Info info = new Info();
         // use bbox always without elevation (for backward compatibility)
         info.bbox = new BBox(storage.getBounds().minLon, storage.getBounds().maxLon, storage.getBounds().minLat, storage.getBounds().maxLat);
-        List<String> encoderNames = Arrays.asList(storage.getEncodingManager().toString().split(","));
-        info.supported_vehicles = new ArrayList<>(encoderNames);
         if (config.has("gtfs.file")) {
             info.supported_vehicles.add("pt");
         }
-        for (String encoderName : encoderNames) {
-            Info.PerVehicle perVehicleJson = new Info.PerVehicle();
-            perVehicleJson.elevation = hasElevation;
-            perVehicleJson.turn_costs = storage.getEncodingManager().getEncoder(encoderName).supportsTurnCosts();
-            info.features.put(encoderName, perVehicleJson);
-        }
         if (config.has("gtfs.file")) {
             info.features.put("pt", new InfoResource.Info.PerVehicle());
+        }
+        List<FlagEncoder> flagEncoders = storage.getEncodingManager().fetchEdgeEncoders();
+        for (FlagEncoder encoder: flagEncoders) {
+            final Info.PerVehicle perVehicleJson = new Info.PerVehicle();
+            perVehicleJson.elevation = hasElevation;
+            perVehicleJson.turn_costs = encoder.supportsTurnCosts();
+            final List<String> weightings = new ArrayList<>();
+            for (CHProfile profile: storage.getCHProfiles()) {
+                final Weighting weighting = profile.getWeighting();
+                if (weighting.getFlagEncoder().equals(encoder)) {
+                    weightings.add(weighting.getName());
+                }
+            }
+            perVehicleJson.weightings = weightings;
+            info.features.put(encoder.toString(), perVehicleJson);
         }
         info.import_date = storage.getProperties().get("datareader.import.date");
         info.data_date = storage.getProperties().get("datareader.data.date");

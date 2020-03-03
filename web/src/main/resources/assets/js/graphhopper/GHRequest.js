@@ -134,12 +134,20 @@ GHRequest.prototype.hasTCSupport = function() {
    }
 };
 
+GHRequest.prototype.initWeighting = function (weighting) {
+    this.api_params.weighting = weighting;
+};
+
 GHRequest.prototype.hasElevation = function () {
     return this.api_params.elevation === true;
 };
 
 GHRequest.prototype.getVehicle = function () {
     return this.api_params.vehicle;
+};
+
+GHRequest.prototype.getWeighting = function () {
+    return this.api_params.weighting;
 };
 
 GHRequest.prototype.isPublicTransit = function () {
