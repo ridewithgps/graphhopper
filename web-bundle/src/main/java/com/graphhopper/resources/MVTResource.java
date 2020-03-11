@@ -1,9 +1,12 @@
 package com.graphhopper.resources;
 
 import com.graphhopper.GraphHopper;
+import com.graphhopper.storage.CHProfile;
+import com.graphhopper.routing.weighting.Weighting;
 import com.graphhopper.routing.profiles.*;
 import com.graphhopper.routing.util.DefaultEdgeFilter;
 import com.graphhopper.routing.util.EncodingManager;
+import com.graphhopper.routing.util.FlagEncoder;
 import com.graphhopper.storage.NodeAccess;
 import com.graphhopper.storage.index.LocationIndexTree;
 import com.graphhopper.storage.index.PopularityIndex;
@@ -135,6 +138,15 @@ public class MVTResource {
                         map.put(ev.getName(), edge.get((BooleanEncodedValue) ev));
                     else if (ev instanceof IntEncodedValue)
                         map.put(ev.getName(), edge.get((IntEncodedValue) ev));
+                }
+
+                for (FlagEncoder encoder: encodingManager.fetchEdgeEncoders()) {
+                    for (CHProfile profile: graphHopper.getGraphHopperStorage().getCHProfiles()) {
+                        final Weighting weighting = profile.getWeighting();
+                        if (weighting.getFlagEncoder().equals(encoder)) {
+                            map.put("WEIGHT " + encoder.toString() + "|" +  weighting.getName(), weighting.calcWeight(edge, false, 0));
+                        }
+                    }
                 }
 
                 lineString.setUserData(map);
