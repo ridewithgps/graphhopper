@@ -1416,6 +1416,10 @@ public class GraphHopper implements GraphHopperAPI {
                 if (encoder.supports(RWGPSWeighting.class)) {
                     weighting = new RWGPSWeighting(encoder, hints);
                 }
+            } else if ("rwgpswithoutpopularity".equalsIgnoreCase(weightingStr)) {
+                if (encoder.supports(RWGPSWithoutPopularityWeighting.class)) {
+                    weighting = new RWGPSWithoutPopularityWeighting(encoder, hints);
+                }
             } else if ("curvature".equalsIgnoreCase(weightingStr)) {
                 if (encoder.supports(CurvatureWeighting.class))
                     weighting = new CurvatureWeighting(encoder, hints, turnCostProvider);
