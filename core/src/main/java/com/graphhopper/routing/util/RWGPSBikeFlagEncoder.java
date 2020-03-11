@@ -47,11 +47,22 @@ public class RWGPSBikeFlagEncoder extends BikeFlagEncoder {
         double cost = 0.6;
 
         if (isBikePath(way)) {
-            cost = 0.225;
-        } else if (isBikeLane(way)) {
-            cost = 0.35;
-        } else if (isSharedBikeLane(way)) {
             cost = 0.40;
+        } else if (isBikeLane(way)) {
+            cost = 0.45;
+        } else if (isSharedBikeLane(way)) {
+            cost = 0.50;
+        } else if (way.hasTag("highway", "track")) {
+            if (way.hasTag("tracktype", "grade1")) {
+                cost = 0.50;
+            } else if (way.hasTag("tracktype", "grade2")) {
+                cost = 0.525;
+            } else if (way.hasTag("tracktype", "grade3")) {
+                cost = 0.70;
+            } else {
+                // this includes grades 4, 5, and no value for tracktype
+                cost = 2.0;
+            }
         } else if (way.hasTag("highway", "motorway", "trunk")) {
             cost = 2.5;
         } else if (way.hasTag("highway", "path", "track") &&
@@ -61,22 +72,38 @@ public class RWGPSBikeFlagEncoder extends BikeFlagEncoder {
 
         // encourage riding on cycling networks
         if (partOfCycleRelation) {
-            cost *= 0.8;
+            cost *= 0.65;
         }
 
-        // massively penalize mountain bike paths
-        if (way.hasTag("mtb:scale") || way.hasTag("mtb")) {
-            cost *= 10;
+        // discourage riding on MTB trails
+        String mtbScale = way.getTag("mtb:scale");
+        if (mtbScale != null) {
+            double mtbFactor = 1;
+
+            if (mtbScale.equals("0-")) {
+                mtbFactor = 1.1;
+            } else if (mtbScale.equals("0")) {
+                mtbFactor = 1.75;
+            } else if (mtbScale.equals("0+")) {
+                // same penalty as RLIS:bicycle=caution_area
+                mtbFactor = 2;
+            } else {
+                // large penalty to all other types
+                mtbFactor = 10;
+            }
+
+            cost *= mtbFactor;
         }
 
         // penalize bike caution_area
         if (way.hasTag("RLIS:bicycle", "caution_area")) {
+            // same penalty as mtb:scale=0+
             cost *= 2;
         }
 
         // only increase cost from road features if we're riding on the road
         if (!way.hasTag("cycleway", "track") && !isBikePath(way)) {
-            // increase cost if number of lanes greater than two
+            // increase cost for too many lanes
             double lanes = getLanes(way);
             if (lanes > 3) {
                 cost += 0.05;
