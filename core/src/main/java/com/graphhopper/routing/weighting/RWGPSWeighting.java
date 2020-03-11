@@ -28,8 +28,7 @@ public class RWGPSWeighting extends PriorityWeighting {
         PopularityIndex popularityIndex = hopper.getPopularityIndex();
         double popularity = popularityIndex.getPopularity(edgeState);
 
-        //return weight * priority * popularity;
-        return popularity;
+        return (weight * priority) * Math.log(2 + ((5/popularity) * 20));
     }
 
     @Override
