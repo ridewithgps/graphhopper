@@ -608,6 +608,13 @@ public class GraphHopper implements GraphHopperAPI {
             cacheDirStr = ghConfig.getString("graph.elevation.cachedir", "");
 
         popularityFile = java.nio.file.Paths.get(args.get("graph.popularity.file", ""));
+        if (!popularityFile.toFile().exists()) {
+            if (isEmpty(popularityFile.toString())) {
+                popularityFile = null;
+            } else {
+                throw new IllegalArgumentException("Popularity file \"" + popularityFile + "\" doesn't exist");
+            }
+        }
 
         String baseURL = ghConfig.getString("graph.elevation.base_url", "");
         if (baseURL.isEmpty())

@@ -46,7 +46,11 @@ public class PopularityIndex implements Storable<PopularityIndex> {
         final int indexSize = this.graph.getEdges() * 4 * 4;
         index.setSegmentSize(indexSize);
         index.create(indexSize);
-        loadData();
+        if (this.popularityFile != null) {
+            loadData();
+        } else {
+            logger.info("NO POPULARITY FILE SPECIFIED.");
+        }
         flush();
         return this;
     }
