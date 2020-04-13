@@ -28,11 +28,12 @@ import com.graphhopper.routing.profiles.IntEncodedValue;
 import com.graphhopper.routing.querygraph.VirtualEdgeIteratorState;
 import com.graphhopper.routing.util.AllEdgesIterator;
 import com.graphhopper.routing.util.EdgeFilter;
-import com.graphhopper.storage.*;
-import com.graphhopper.util.EdgeExplorer;
-import com.graphhopper.util.EdgeIterator;
-import com.graphhopper.util.EdgeIteratorState;
-import com.graphhopper.util.PointList;
+import com.graphhopper.routing.weighting.Weighting;
+import com.graphhopper.storage.Graph;
+import com.graphhopper.storage.IntsRef;
+import com.graphhopper.storage.NodeAccess;
+import com.graphhopper.storage.TurnCostStorage;
+import com.graphhopper.util.*;
 import com.graphhopper.util.shapes.BBox;
 
 import java.util.ArrayList;
@@ -58,7 +59,7 @@ public class WrapperGraph implements Graph {
             }
             extraEdgesBySource.put(extraEdge.getBaseNode(), extraEdge);
             extraEdgesByDestination.put(extraEdge.getAdjNode(), new VirtualEdgeIteratorState(extraEdge.getOriginalEdgeKey(), extraEdge.getEdge(), extraEdge.getAdjNode(),
-                    extraEdge.getBaseNode(), extraEdge.getDistance(), extraEdge.getFlags(), extraEdge.getName(), extraEdge.fetchWayGeometry(3), true));
+                    extraEdge.getBaseNode(), extraEdge.getDistance(), extraEdge.getFlags(), extraEdge.getName(), extraEdge.fetchWayGeometry(FetchMode.ALL), true));
         }
     }
 
@@ -153,7 +154,7 @@ public class WrapperGraph implements Graph {
             }
 
             @Override
-            public PointList fetchWayGeometry(int mode) {
+            public PointList fetchWayGeometry(FetchMode mode) {
                 throw new UnsupportedOperationException();
             }
 
@@ -351,7 +352,7 @@ public class WrapperGraph implements Graph {
                     }
 
                     @Override
-                    public PointList fetchWayGeometry(int mode) {
+                    public PointList fetchWayGeometry(FetchMode mode) {
                         return current.fetchWayGeometry(mode);
                     }
 
@@ -512,8 +513,13 @@ public class WrapperGraph implements Graph {
     }
 
     @Override
-    public TurnCostExtension getTurnCostExtension() {
-        return mainGraph.getTurnCostExtension();
+    public TurnCostStorage getTurnCostStorage() {
+        return mainGraph.getTurnCostStorage();
+    }
+
+    @Override
+    public Weighting wrapWeighting(Weighting weighting) {
+        return mainGraph.wrapWeighting(weighting);
     }
 
     @Override

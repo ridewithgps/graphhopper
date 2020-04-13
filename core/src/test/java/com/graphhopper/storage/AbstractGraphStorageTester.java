@@ -29,8 +29,6 @@ import org.junit.Test;
 import java.io.Closeable;
 import java.io.File;
 import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.Collections;
 import java.util.List;
 
 import static com.graphhopper.routing.util.EncodingManager.getKey;
@@ -48,8 +46,8 @@ public abstract class AbstractGraphStorageTester {
     private final String locationParent = "./target/graphstorage";
     protected int defaultSize = 100;
     protected String defaultGraphLoc = "./target/graphstorage/default";
-    protected EncodingManager encodingManager = EncodingManager.create("car,foot");
-    protected CarFlagEncoder carEncoder = (CarFlagEncoder) encodingManager.getEncoder("car");
+    protected CarFlagEncoder carEncoder = createCarFlagEncoder();
+    protected EncodingManager encodingManager = new EncodingManager.Builder().add(carEncoder).add(new FootFlagEncoder()).build();
     protected BooleanEncodedValue carAccessEnc = carEncoder.getAccessEnc();
     protected DecimalEncodedValue carAvSpeedEnc = carEncoder.getAverageSpeedEnc();
     protected FootFlagEncoder footEncoder = (FootFlagEncoder) encodingManager.getEncoder("foot");
@@ -88,6 +86,10 @@ public abstract class AbstractGraphStorageTester {
             }
         }
         throw new IllegalArgumentException("did not find node with location " + (float) latitude + "," + (float) longitude);
+    }
+
+    CarFlagEncoder createCarFlagEncoder() {
+        return new CarFlagEncoder(5, 5, 0);
     }
 
     protected GraphHopperStorage createGHStorage() {
@@ -133,7 +135,7 @@ public abstract class AbstractGraphStorageTester {
         }
         graph.edge(defaultSize + 1, defaultSize + 2, 10, true);
         graph.edge(defaultSize + 1, defaultSize + 3, 10, true);
-        assertEquals(2, GHUtility.count(carAllExplorer.setBaseNode(defaultSize + 1)));
+        assertEquals(2, getCountAll(defaultSize + 1));
     }
 
     @Test
@@ -147,22 +149,22 @@ public abstract class AbstractGraphStorageTester {
     public void testCreateLocation() {
         graph = createGHStorage();
         graph.edge(3, 1, 50, true);
-        assertEquals(1, count(carOutExplorer.setBaseNode(1)));
+        assertEquals(1, getCountOut(1));
 
         graph.edge(1, 2, 100, true);
-        assertEquals(2, count(carOutExplorer.setBaseNode(1)));
+        assertEquals(2, getCountOut(1));
     }
 
     @Test
     public void testEdges() {
         graph = createGHStorage();
         graph.edge(2, 1, 12, true);
-        assertEquals(1, count(carOutExplorer.setBaseNode(2)));
+        assertEquals(1, getCountOut(2));
 
         graph.edge(2, 3, 12, true);
-        assertEquals(1, count(carOutExplorer.setBaseNode(1)));
-        assertEquals(2, count(carOutExplorer.setBaseNode(2)));
-        assertEquals(1, count(carOutExplorer.setBaseNode(3)));
+        assertEquals(1, getCountOut(1));
+        assertEquals(2, getCountOut(2));
+        assertEquals(1, getCountOut(3));
     }
 
     @Test
@@ -177,13 +179,13 @@ public abstract class AbstractGraphStorageTester {
         EdgeIterator i = carOutExplorer.setBaseNode(2);
         assertFalse(i.next());
 
-        assertEquals(1, GHUtility.count(carInExplorer.setBaseNode(1)));
-        assertEquals(2, GHUtility.count(carInExplorer.setBaseNode(2)));
-        assertEquals(0, GHUtility.count(carInExplorer.setBaseNode(3)));
+        assertEquals(1, getCountIn(1));
+        assertEquals(2, getCountIn(2));
+        assertEquals(0, getCountIn(3));
 
-        assertEquals(3, GHUtility.count(carOutExplorer.setBaseNode(1)));
-        assertEquals(0, GHUtility.count(carOutExplorer.setBaseNode(2)));
-        assertEquals(1, GHUtility.count(carOutExplorer.setBaseNode(3)));
+        assertEquals(3, getCountOut(1));
+        assertEquals(0, getCountOut(2));
+        assertEquals(1, getCountOut(3));
         i = carOutExplorer.setBaseNode(3);
         i.next();
         assertEquals(2, i.getAdjNode());
@@ -210,15 +212,15 @@ public abstract class AbstractGraphStorageTester {
         EdgeIterator i = carOutExplorer.setBaseNode(2);
         assertFalse(i.next());
 
-        assertEquals(4, GHUtility.count(carAllExplorer.setBaseNode(1)));
+        assertEquals(4, getCountAll(1));
 
-        assertEquals(1, GHUtility.count(carInExplorer.setBaseNode(1)));
-        assertEquals(2, GHUtility.count(carInExplorer.setBaseNode(2)));
-        assertEquals(0, GHUtility.count(carInExplorer.setBaseNode(3)));
+        assertEquals(1, getCountIn(1));
+        assertEquals(2, getCountIn(2));
+        assertEquals(0, getCountIn(3));
 
-        assertEquals(3, GHUtility.count(carOutExplorer.setBaseNode(1)));
-        assertEquals(0, GHUtility.count(carOutExplorer.setBaseNode(2)));
-        assertEquals(1, GHUtility.count(carOutExplorer.setBaseNode(3)));
+        assertEquals(3, getCountOut(1));
+        assertEquals(0, getCountOut(2));
+        assertEquals(1, getCountOut(3));
         i = carOutExplorer.setBaseNode(3);
         i.next();
         assertEquals(2, i.getAdjNode());
@@ -269,7 +271,7 @@ public abstract class AbstractGraphStorageTester {
 
         Graph cloneGraph = graph.copyTo(AbstractGraphStorageTester.this.createGHStorage(locationParent + "/clone", false));
         assertEquals(graph.getNodes(), cloneGraph.getNodes());
-        assertEquals(count(carOutExplorer.setBaseNode(1)), count(cloneGraph.createEdgeExplorer(carOutFilter).setBaseNode(1)));
+        assertEquals(getCountOut(1), count(cloneGraph.createEdgeExplorer(carOutFilter).setBaseNode(1)));
         cloneGraph.edge(1, 4, 10, true);
         assertEquals(3, count(cloneGraph.createEdgeExplorer(carOutFilter).setBaseNode(1)));
         assertEquals(graph.getBounds(), cloneGraph.getBounds());
@@ -286,7 +288,7 @@ public abstract class AbstractGraphStorageTester {
         assertEquals(edge.getName(), newEdge.getName());
         assertEquals(edge.getDistance(), newEdge.getDistance(), 1e-7);
         assertEquals(edge.getFlags(), newEdge.getFlags());
-        assertEquals(edge.fetchWayGeometry(0), newEdge.fetchWayGeometry(0));
+        assertEquals(edge.fetchWayGeometry(FetchMode.PILLAR_ONLY), newEdge.fetchWayGeometry(FetchMode.PILLAR_ONLY));
     }
 
     @Test
@@ -302,7 +304,7 @@ public abstract class AbstractGraphStorageTester {
 
         graph.edge(0, 2, 10, true);
         assertEquals(3, graph.getNodes());
-        Helper.close((Closeable) graph);
+        Helper.close(graph);
 
         graph = createGHStorage();
         assertEquals(0, graph.getNodes());
@@ -362,7 +364,7 @@ public abstract class AbstractGraphStorageTester {
         assertEquals(GHUtility.asSet(0), GHUtility.getNeighbors(carOutExplorer.setBaseNode((1))));
         assertEquals(GHUtility.asSet(5, 4, 3, 2, 1), GHUtility.getNeighbors(carOutExplorer.setBaseNode(0)));
         try {
-            assertEquals(0, count(carOutExplorer.setBaseNode(6)));
+            assertEquals(0, getCountOut(6));
             // for now return empty iterator
             // assertFalse(true);
         } catch (Exception ex) {
@@ -378,66 +380,67 @@ public abstract class AbstractGraphStorageTester {
         graph.edge(3, 5, 12, true);
         graph.edge(6, 3, 12, false);
 
-        assertEquals(1, count(carAllExplorer.setBaseNode(1)));
-        assertEquals(1, count(carInExplorer.setBaseNode(1)));
-        assertEquals(1, count(carOutExplorer.setBaseNode(1)));
+        assertEquals(1, getCountAll(1));
+        assertEquals(1, getCountIn(1));
+        assertEquals(1, getCountOut(1));
 
-        assertEquals(2, count(carAllExplorer.setBaseNode(2)));
-        assertEquals(1, count(carInExplorer.setBaseNode(2)));
-        assertEquals(2, count(carOutExplorer.setBaseNode(2)));
+        assertEquals(2, getCountAll(2));
+        assertEquals(1, getCountIn(2));
+        assertEquals(2, getCountOut(2));
 
-        assertEquals(4, count(carAllExplorer.setBaseNode(3)));
-        assertEquals(3, count(carInExplorer.setBaseNode(3)));
-        assertEquals(2, count(carOutExplorer.setBaseNode(3)));
+        assertEquals(4, getCountAll(3));
+        assertEquals(3, getCountIn(3));
+        assertEquals(2, getCountOut(3));
 
-        assertEquals(1, count(carAllExplorer.setBaseNode(4)));
-        assertEquals(1, count(carInExplorer.setBaseNode(4)));
-        assertEquals(0, count(carOutExplorer.setBaseNode(4)));
+        assertEquals(1, getCountAll(4));
+        assertEquals(1, getCountIn(4));
+        assertEquals(0, getCountOut(4));
 
-        assertEquals(1, count(carAllExplorer.setBaseNode(5)));
-        assertEquals(1, count(carInExplorer.setBaseNode(5)));
-        assertEquals(1, count(carOutExplorer.setBaseNode(5)));
+        assertEquals(1, getCountAll(5));
+        assertEquals(1, getCountIn(5));
+        assertEquals(1, getCountOut(5));
     }
 
     @Test
     public void testDozendEdges() {
         graph = createGHStorage();
         graph.edge(1, 2, 12, true);
-        assertEquals(1, count(carAllExplorer.setBaseNode(1)));
+        int nn = 1;
+        assertEquals(1, getCountAll(nn));
 
         graph.edge(1, 3, 13, false);
-        assertEquals(2, count(carAllExplorer.setBaseNode(1)));
+        assertEquals(2, getCountAll(1));
 
         graph.edge(1, 4, 14, false);
-        assertEquals(3, count(carAllExplorer.setBaseNode(1)));
+        assertEquals(3, getCountAll(1));
 
         graph.edge(1, 5, 15, false);
-        assertEquals(4, count(carAllExplorer.setBaseNode(1)));
+        assertEquals(4, getCountAll(1));
 
         graph.edge(1, 6, 16, false);
-        assertEquals(5, count(carAllExplorer.setBaseNode(1)));
+        assertEquals(5, getCountAll(1));
 
         graph.edge(1, 7, 16, false);
-        assertEquals(6, count(carAllExplorer.setBaseNode(1)));
+        assertEquals(6, getCountAll(1));
 
         graph.edge(1, 8, 16, false);
-        assertEquals(7, count(carAllExplorer.setBaseNode(1)));
+        assertEquals(7, getCountAll(1));
 
         graph.edge(1, 9, 16, false);
-        assertEquals(8, count(carAllExplorer.setBaseNode(1)));
-        assertEquals(8, count(carOutExplorer.setBaseNode(1)));
+        assertEquals(8, getCountAll(1));
+        assertEquals(8, getCountOut(1));
 
-        assertEquals(1, count(carInExplorer.setBaseNode(1)));
-        assertEquals(1, count(carInExplorer.setBaseNode(2)));
+        assertEquals(1, getCountIn(1));
+        assertEquals(1, getCountIn(2));
     }
 
     @Test
     public void testCheckFirstNode() {
         graph = createGHStorage();
 
-        assertEquals(0, count(carAllExplorer.setBaseNode(1)));
+        assertEquals(0, getCountAll(1));
         graph.edge(0, 1, 12, true);
-        assertEquals(1, count(carAllExplorer.setBaseNode(1)));
+        assertEquals(1, getCountAll(1));
     }
 
     @Test
@@ -458,17 +461,17 @@ public abstract class AbstractGraphStorageTester {
         graph.optimize();
         assertEquals(20, graph.getNodes());
 
-        assertEquals(1, GHUtility.count(carInExplorer.setBaseNode(getIdOf(graph, 20))));
-        assertEquals(0, GHUtility.count(carOutExplorer.setBaseNode(getIdOf(graph, 20))));
+        assertEquals(1, getCountIn(getIdOf(graph, 20)));
+        assertEquals(0, getCountOut(getIdOf(graph, 20)));
 
-        assertEquals(1, GHUtility.count(carOutExplorer.setBaseNode(getIdOf(graph, 10))));
-        assertEquals(0, GHUtility.count(carInExplorer.setBaseNode(getIdOf(graph, 10))));
+        assertEquals(1, getCountOut(getIdOf(graph, 10)));
+        assertEquals(0, getCountIn(getIdOf(graph, 10)));
 
-        assertEquals(1, GHUtility.count(carInExplorer.setBaseNode(getIdOf(graph, 6))));
-        assertEquals(0, GHUtility.count(carOutExplorer.setBaseNode(getIdOf(graph, 6))));
+        assertEquals(1, getCountIn(getIdOf(graph, 6)));
+        assertEquals(0, getCountOut(getIdOf(graph, 6)));
 
-        assertEquals(1, GHUtility.count(carOutExplorer.setBaseNode(getIdOf(graph, 21))));
-        assertEquals(0, GHUtility.count(carInExplorer.setBaseNode(getIdOf(graph, 21))));
+        assertEquals(1, getCountOut(getIdOf(graph, 21)));
+        assertEquals(0, getCountIn(getIdOf(graph, 21)));
     }
 
     @Test
@@ -518,12 +521,12 @@ public abstract class AbstractGraphStorageTester {
         // no deletion happend
         assertEquals(fillToSize, graph.getNodes());
 
-        assertEquals(Collections.<String>emptyList(), GHUtility.getProblems(graph));
+        assertTrue(GHUtility.getProblems(graph).isEmpty());
 
         // now actually perform deletion
         graph.optimize();
 
-        assertEquals(Collections.<String>emptyList(), GHUtility.getProblems(graph));
+        assertTrue(GHUtility.getProblems(graph).isEmpty());
 
         assertEquals(fillToSize - deleted, graph.getNodes());
         int id1 = getIdOf(graph, 38.33f);
@@ -563,17 +566,17 @@ public abstract class AbstractGraphStorageTester {
         graph.markNodeRemoved(3);
 
         assertEquals(6, graph.getNodes());
-        assertEquals(Collections.<String>emptyList(), GHUtility.getProblems(graph));
+        assertTrue(GHUtility.getProblems(graph).isEmpty());
 
         // now actually perform deletion
         graph.optimize();
 
         assertEquals(4, graph.getNodes());
-        assertEquals(Collections.<String>emptyList(), GHUtility.getProblems(graph));
+        assertTrue(GHUtility.getProblems(graph).isEmpty());
         // shouldn't change anything
         graph.optimize();
         assertEquals(4, graph.getNodes());
-        assertEquals(Collections.<String>emptyList(), GHUtility.getProblems(graph));
+        assertTrue(GHUtility.getProblems(graph).isEmpty());
     }
 
     @Test
@@ -599,13 +602,13 @@ public abstract class AbstractGraphStorageTester {
         graph.edge(9, 12, 912, true).setWayGeometry(pl);
 
         assertEquals(13, graph.getNodes());
-        assertEquals(Collections.<String>emptyList(), GHUtility.getProblems(graph));
+        assertTrue(GHUtility.getProblems(graph).isEmpty());
 
         // perform deletion
         graph.optimize();
 
         assertEquals(11, graph.getNodes());
-        assertEquals(Collections.<String>emptyList(), GHUtility.getProblems(graph));
+        assertTrue(GHUtility.getProblems(graph).isEmpty());
 
         int id11 = getIdOf(graph, 11); // is now 10
         int id12 = getIdOf(graph, 12); // is now 5
@@ -617,11 +620,11 @@ public abstract class AbstractGraphStorageTester {
         EdgeIterator iter = carAllExplorer.setBaseNode(id9);
         assertTrue(iter.next());
         assertEquals(id12, iter.getAdjNode());
-        assertEquals(2, iter.fetchWayGeometry(0).getLongitude(0), 1e-7);
+        assertEquals(2, iter.fetchWayGeometry(FetchMode.PILLAR_ONLY).getLongitude(0), 1e-7);
 
         assertTrue(iter.next());
         assertEquals(id11, iter.getAdjNode());
-        assertEquals(2, iter.fetchWayGeometry(0).getLongitude(0), 1e-7);
+        assertEquals(2, iter.fetchWayGeometry(FetchMode.PILLAR_ONLY).getLongitude(0), 1e-7);
     }
 
     @Test
@@ -647,12 +650,12 @@ public abstract class AbstractGraphStorageTester {
         // perform deletion
         graph.optimize();
 
-        assertEquals(Arrays.<String>asList(), GHUtility.getProblems(graph));
+        assertTrue(GHUtility.getProblems(graph).isEmpty());
 
-        assertEquals(3, GHUtility.count(carAllExplorer.setBaseNode(getIdOf(graph, 9))));
-        assertEquals(1, GHUtility.count(carAllExplorer.setBaseNode(getIdOf(graph, 7))));
-        assertEquals(1, GHUtility.count(carAllExplorer.setBaseNode(getIdOf(graph, 8))));
-        assertEquals(1, GHUtility.count(carAllExplorer.setBaseNode(getIdOf(graph, 11))));
+        assertEquals(3, getCountAll(getIdOf(graph, 9)));
+        assertEquals(1, getCountAll(getIdOf(graph, 7)));
+        assertEquals(1, getCountAll(getIdOf(graph, 8)));
+        assertEquals(1, getCountAll(getIdOf(graph, 11)));
     }
 
     @Test
@@ -755,7 +758,7 @@ public abstract class AbstractGraphStorageTester {
         graph.edge(2, 1, 12, true);
         graph.edge(2, 3, 12, true);
         graph.edge(2, 3, 13, false);
-        assertEquals(3, GHUtility.count(carOutExplorer.setBaseNode(2)));
+        assertEquals(3, getCountOut(2));
 
         // no exception
         graph.getEdgeIteratorState(1, 3);
@@ -787,14 +790,14 @@ public abstract class AbstractGraphStorageTester {
         assertTrue(oneIter.getReverse(carAccessEnc));
 
         graph.edge(3, 2, 14, true);
-        assertEquals(4, GHUtility.count(carOutExplorer.setBaseNode(2)));
+        assertEquals(4, getCountOut(2));
     }
 
     @Test
     public void testIdenticalNodes() {
         graph = createGHStorage();
         graph.edge(0, 0, 100, true);
-        assertEquals(1, GHUtility.count(carAllExplorer.setBaseNode(0)));
+        assertEquals(1, getCountAll(0));
     }
 
     @Test
@@ -802,7 +805,7 @@ public abstract class AbstractGraphStorageTester {
         graph = createGHStorage();
         graph.edge(0, 0, 100, false);
         graph.edge(0, 0, 100, false);
-        assertEquals(2, GHUtility.count(carAllExplorer.setBaseNode(0)));
+        assertEquals(2, getCountAll(0));
     }
 
     @Test
@@ -840,33 +843,33 @@ public abstract class AbstractGraphStorageTester {
         EdgeIterator iter = carAllExplorer.setBaseNode(0);
         assertTrue(iter.next());
         assertEquals(14, iter.getAdjNode());
-        assertPList(Helper.createPointList(1, 11, 1, 12, 1, 13.0), iter.fetchWayGeometry(0));
-        assertPList(Helper.createPointList(0.01, 0.01, 1, 11, 1, 12, 1, 13.0), iter.fetchWayGeometry(1));
-        assertPList(Helper.createPointList(1, 11, 1, 12, 1, 13.0, 0.14, 0.14), iter.fetchWayGeometry(2));
-        assertPList(Helper.createPointList(0.01, 0.01, 1, 11, 1, 12, 1, 13.0, 0.14, 0.14), iter.fetchWayGeometry(3));
+        assertPList(Helper.createPointList(1, 11, 1, 12, 1, 13.0), iter.fetchWayGeometry(FetchMode.PILLAR_ONLY));
+        assertPList(Helper.createPointList(0.01, 0.01, 1, 11, 1, 12, 1, 13.0), iter.fetchWayGeometry(FetchMode.BASE_AND_PILLAR));
+        assertPList(Helper.createPointList(1, 11, 1, 12, 1, 13.0, 0.14, 0.14), iter.fetchWayGeometry(FetchMode.PILLAR_AND_ADJ));
+        assertPList(Helper.createPointList(0.01, 0.01, 1, 11, 1, 12, 1, 13.0, 0.14, 0.14), iter.fetchWayGeometry(FetchMode.ALL));
 
         assertTrue(iter.next());
         assertEquals(4, iter.getAdjNode());
-        assertPList(Helper.createPointList(1, 1, 1, 2, 1, 3), iter.fetchWayGeometry(0));
-        assertPList(Helper.createPointList(0.01, 0.01, 1, 1, 1, 2, 1, 3), iter.fetchWayGeometry(1));
-        assertPList(Helper.createPointList(1, 1, 1, 2, 1, 3, 0.4, 0.4), iter.fetchWayGeometry(2));
-        assertPList(Helper.createPointList(0.01, 0.01, 1, 1, 1, 2, 1, 3, 0.4, 0.4), iter.fetchWayGeometry(3));
+        assertPList(Helper.createPointList(1, 1, 1, 2, 1, 3), iter.fetchWayGeometry(FetchMode.PILLAR_ONLY));
+        assertPList(Helper.createPointList(0.01, 0.01, 1, 1, 1, 2, 1, 3), iter.fetchWayGeometry(FetchMode.BASE_AND_PILLAR));
+        assertPList(Helper.createPointList(1, 1, 1, 2, 1, 3, 0.4, 0.4), iter.fetchWayGeometry(FetchMode.PILLAR_AND_ADJ));
+        assertPList(Helper.createPointList(0.01, 0.01, 1, 1, 1, 2, 1, 3, 0.4, 0.4), iter.fetchWayGeometry(FetchMode.ALL));
 
         assertFalse(iter.next());
 
         iter = carOutExplorer.setBaseNode(0);
         assertTrue(iter.next());
         assertEquals(4, iter.getAdjNode());
-        assertPList(Helper.createPointList(1, 1, 1, 2, 1, 3), iter.fetchWayGeometry(0));
+        assertPList(Helper.createPointList(1, 1, 1, 2, 1, 3), iter.fetchWayGeometry(FetchMode.PILLAR_ONLY));
         assertFalse(iter.next());
 
         iter = carInExplorer.setBaseNode(10);
         assertTrue(iter.next());
         assertEquals(4, iter.getAdjNode());
-        assertPList(Helper.createPointList(1, 9, 1, 8, 1, 7, 1, 6, 1, 5), iter.fetchWayGeometry(0));
-        assertPList(Helper.createPointList(0.99, 0.99, 1, 9, 1, 8, 1, 7, 1, 6, 1, 5), iter.fetchWayGeometry(1));
-        assertPList(Helper.createPointList(1, 9, 1, 8, 1, 7, 1, 6, 1, 5, 0.4, 0.4), iter.fetchWayGeometry(2));
-        assertPList(Helper.createPointList(0.99, 0.99, 1, 9, 1, 8, 1, 7, 1, 6, 1, 5, 0.4, 0.4), iter.fetchWayGeometry(3));
+        assertPList(Helper.createPointList(1, 9, 1, 8, 1, 7, 1, 6, 1, 5), iter.fetchWayGeometry(FetchMode.PILLAR_ONLY));
+        assertPList(Helper.createPointList(0.99, 0.99, 1, 9, 1, 8, 1, 7, 1, 6, 1, 5), iter.fetchWayGeometry(FetchMode.BASE_AND_PILLAR));
+        assertPList(Helper.createPointList(1, 9, 1, 8, 1, 7, 1, 6, 1, 5, 0.4, 0.4), iter.fetchWayGeometry(FetchMode.PILLAR_AND_ADJ));
+        assertPList(Helper.createPointList(0.99, 0.99, 1, 9, 1, 8, 1, 7, 1, 6, 1, 5, 0.4, 0.4), iter.fetchWayGeometry(FetchMode.ALL));
         assertFalse(iter.next());
     }
 
@@ -1037,9 +1040,9 @@ public abstract class AbstractGraphStorageTester {
         assertEquals(100, na.getEle(1), 1e-1);
 
         graph.edge(0, 1).setWayGeometry(Helper.createPointList3D(10, 27, 72, 11, 20, 1));
-        assertEquals(Helper.createPointList3D(10, 27, 72, 11, 20, 1), GHUtility.getEdge(graph, 0, 1).fetchWayGeometry(0));
-        assertEquals(Helper.createPointList3D(10, 20, -10, 10, 27, 72, 11, 20, 1, 11, 2, 100), GHUtility.getEdge(graph, 0, 1).fetchWayGeometry(3));
-        assertEquals(Helper.createPointList3D(11, 2, 100, 11, 20, 1, 10, 27, 72, 10, 20, -10), GHUtility.getEdge(graph, 1, 0).fetchWayGeometry(3));
+        assertEquals(Helper.createPointList3D(10, 27, 72, 11, 20, 1), GHUtility.getEdge(graph, 0, 1).fetchWayGeometry(FetchMode.PILLAR_ONLY));
+        assertEquals(Helper.createPointList3D(10, 20, -10, 10, 27, 72, 11, 20, 1, 11, 2, 100), GHUtility.getEdge(graph, 0, 1).fetchWayGeometry(FetchMode.ALL));
+        assertEquals(Helper.createPointList3D(11, 2, 100, 11, 20, 1, 10, 27, 72, 10, 20, -10), GHUtility.getEdge(graph, 1, 0).fetchWayGeometry(FetchMode.ALL));
     }
 
     @Test
@@ -1088,14 +1091,14 @@ public abstract class AbstractGraphStorageTester {
         iter.next();
         EdgeIteratorState edgeState02 = iter.detach(false);
         assertEquals(2, iter.getAdjNode());
-        assertEquals(1, edgeState02.fetchWayGeometry(0).getLatitude(0), 1e-1);
+        assertEquals(1, edgeState02.fetchWayGeometry(FetchMode.PILLAR_ONLY).getLatitude(0), 1e-1);
         assertEquals(2, edgeState02.getAdjNode());
         assertTrue(edgeState02.get(carAccessEnc));
 
         EdgeIteratorState edgeState20 = iter.detach(true);
         assertEquals(0, edgeState20.getAdjNode());
         assertEquals(2, edgeState20.getBaseNode());
-        assertEquals(3, edgeState20.fetchWayGeometry(0).getLatitude(0), 1e-1);
+        assertEquals(3, edgeState20.fetchWayGeometry(FetchMode.PILLAR_ONLY).getLatitude(0), 1e-1);
         assertFalse(edgeState20.get(carAccessEnc));
         assertEquals(GHUtility.getEdge(graph, 0, 2).getFlags(), edgeState02.getFlags());
         assertEquals(GHUtility.getEdge(graph, 2, 0).getFlags(), edgeState20.getFlags());
@@ -1105,9 +1108,9 @@ public abstract class AbstractGraphStorageTester {
         assertEquals(2, edgeState02.getAdjNode());
         assertEquals(2, edgeState20.getBaseNode());
 
-        assertEquals(0, iter.fetchWayGeometry(0).size());
-        assertEquals(1, edgeState02.fetchWayGeometry(0).getLatitude(0), 1e-1);
-        assertEquals(3, edgeState20.fetchWayGeometry(0).getLatitude(0), 1e-1);
+        assertEquals(0, iter.fetchWayGeometry(FetchMode.PILLAR_ONLY).size());
+        assertEquals(1, edgeState02.fetchWayGeometry(FetchMode.PILLAR_ONLY).getLatitude(0), 1e-1);
+        assertEquals(3, edgeState20.fetchWayGeometry(FetchMode.PILLAR_ONLY).getLatitude(0), 1e-1);
 
         // #162 a directed self referencing edge should be able to reverse its state too
         GHUtility.setProperties(graph.edge(3, 3, 2, true), carEncoder, 10, true, false);
@@ -1117,6 +1120,18 @@ public abstract class AbstractGraphStorageTester {
         assertEquals(3, edgeState33.getAdjNode());
         assertEquals(edgeState02.getFlags(), edgeState33.detach(false).getFlags());
         assertEquals(edgeState20.getFlags(), edgeState33.detach(true).getFlags());
+    }
+
+    private int getCountOut(int node) {
+        return GHUtility.count(carOutExplorer.setBaseNode(node));
+    }
+
+    private int getCountIn(int node) {
+        return GHUtility.count(carInExplorer.setBaseNode(node));
+    }
+
+    private int getCountAll(int node) {
+        return GHUtility.count(carAllExplorer.setBaseNode(node));
     }
 
     static class TmpCarFlagEncoder extends CarFlagEncoder {

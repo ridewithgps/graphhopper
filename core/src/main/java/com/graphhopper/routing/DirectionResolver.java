@@ -18,7 +18,6 @@
 package com.graphhopper.routing;
 
 import com.graphhopper.routing.profiles.BooleanEncodedValue;
-import com.graphhopper.routing.util.FlagEncoder;
 import com.graphhopper.storage.Graph;
 import com.graphhopper.storage.NodeAccess;
 import com.graphhopper.util.*;
@@ -53,12 +52,12 @@ import java.util.*;
 public class DirectionResolver {
     private final EdgeExplorer edgeExplorer;
     private final NodeAccess nodeAccess;
-    private final FlagEncoder encoder;
+    private final BooleanEncodedValue accessEnc;
 
-    public DirectionResolver(Graph graph, FlagEncoder encoder) {
-        edgeExplorer = graph.createEdgeExplorer();
-        nodeAccess = graph.getNodeAccess();
-        this.encoder = encoder;
+    public DirectionResolver(Graph graph, BooleanEncodedValue accessEnc) {
+        this.edgeExplorer = graph.createEdgeExplorer();
+        this.nodeAccess = graph.getNodeAccess();
+        this.accessEnc = accessEnc;
     }
 
     /**
@@ -179,7 +178,6 @@ public class DirectionResolver {
             if (iter instanceof CHEdgeIteratorState && ((CHEdgeIteratorState) iter).isShortcut()) {
                 continue;
             }
-            BooleanEncodedValue accessEnc = encoder.getAccessEnc();
             boolean isIn = iter.getReverse(accessEnc);
             boolean isOut = iter.get(accessEnc);
             if (!isIn && !isOut) {
@@ -192,7 +190,7 @@ public class DirectionResolver {
             }
             // we are interested in the coordinates of the next point on this edge, it could be the adj tower node
             // but also a pillar node
-            final PointList geometry = iter.fetchWayGeometry(3);
+            final PointList geometry = iter.fetchWayGeometry(FetchMode.ALL);
             double nextPointLat = geometry.getLat(1);
             double nextPointLon = geometry.getLon(1);
 

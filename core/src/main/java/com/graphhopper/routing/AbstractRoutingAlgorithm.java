@@ -39,10 +39,10 @@ public abstract class AbstractRoutingAlgorithm implements RoutingAlgorithm {
     protected final FlagEncoder flagEncoder;
     protected final TraversalMode traversalMode;
     protected NodeAccess nodeAccess;
-    protected EdgeExplorer inEdgeExplorer;
-    protected EdgeExplorer outEdgeExplorer;
+    protected EdgeExplorer edgeExplorer;
+    protected EdgeFilter inEdgeFilter;
+    protected EdgeFilter outEdgeFilter;
     protected int maxVisitedNodes = Integer.MAX_VALUE;
-    protected EdgeFilter additionalEdgeFilter;
     private boolean alreadyRun;
 
     /**
@@ -51,13 +51,16 @@ public abstract class AbstractRoutingAlgorithm implements RoutingAlgorithm {
      * @param traversalMode how the graph is traversed e.g. if via nodes or edges.
      */
     public AbstractRoutingAlgorithm(Graph graph, Weighting weighting, TraversalMode traversalMode) {
+        if (weighting.hasTurnCosts() && !traversalMode.isEdgeBased())
+            throw new IllegalStateException("Weightings supporting turn costs cannot be used with node-based traversal mode");
         this.weighting = weighting;
         this.flagEncoder = weighting.getFlagEncoder();
         this.traversalMode = traversalMode;
         this.graph = graph;
         this.nodeAccess = graph.getNodeAccess();
-        outEdgeExplorer = graph.createEdgeExplorer(DefaultEdgeFilter.outEdges(flagEncoder));
-        inEdgeExplorer = graph.createEdgeExplorer(DefaultEdgeFilter.inEdges(flagEncoder));
+        inEdgeFilter = DefaultEdgeFilter.inEdges(flagEncoder.getAccessEnc());
+        outEdgeFilter = DefaultEdgeFilter.outEdges(flagEncoder.getAccessEnc());
+        edgeExplorer = graph.createEdgeExplorer();
     }
 
     @Override
@@ -65,18 +68,10 @@ public abstract class AbstractRoutingAlgorithm implements RoutingAlgorithm {
         this.maxVisitedNodes = numberOfNodes;
     }
 
-    public RoutingAlgorithm setEdgeFilter(EdgeFilter additionalEdgeFilter) {
-        this.additionalEdgeFilter = additionalEdgeFilter;
-        return this;
-    }
-
     protected boolean accept(EdgeIteratorState iter, int prevOrNextEdgeId) {
         // for edge-based traversal we leave it for TurnWeighting to decide whether or not a u-turn is acceptable,
         // but for node-based traversal we exclude such a turn for performance reasons already here
-        if (!traversalMode.isEdgeBased() && iter.getEdge() == prevOrNextEdgeId)
-            return false;
-
-        return additionalEdgeFilter == null || additionalEdgeFilter.accept(iter);
+        return traversalMode.isEdgeBased() || iter.getEdge() != prevOrNextEdgeId;
     }
 
     protected void checkAlreadyRun() {

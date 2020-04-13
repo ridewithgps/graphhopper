@@ -17,11 +17,10 @@
  */
 package com.graphhopper.routing.util;
 
-import com.graphhopper.reader.OSMTurnRelation;
-import com.graphhopper.reader.ReaderRelation;
 import com.graphhopper.reader.ReaderWay;
 import com.graphhopper.routing.profiles.EncodedValue;
 import com.graphhopper.routing.profiles.UnsignedDecimalEncodedValue;
+import com.graphhopper.routing.util.spatialrules.TransportationMode;
 import com.graphhopper.storage.IntsRef;
 import com.graphhopper.util.Helper;
 import com.graphhopper.util.PMap;
@@ -54,22 +53,19 @@ public class CarFlagEncoder extends AbstractFlagEncoder {
     }
 
     public CarFlagEncoder(PMap properties) {
-        this((int) properties.getLong("speed_bits", 5),
+        this(properties.getInt("speed_bits", 5),
                 properties.getDouble("speed_factor", 5),
                 properties.getBool("turn_costs", false) ? 1 : 0);
-        this.speedTwoDirections = properties.getBool("speed_two_directions", false);
-        this.setBlockFords(properties.getBool("block_fords", true));
-        this.setBlockByDefault(properties.getBool("block_barriers", true));
-    }
 
-    public CarFlagEncoder(String propertiesStr) {
-        this(new PMap(propertiesStr));
+        blockPrivate(properties.getBool("block_private", true));
+        blockFords(properties.getBool("block_fords", false));
+        blockBarriersByDefault(properties.getBool("block_barriers", true));
+        speedTwoDirections = properties.getBool("speed_two_directions", false);
     }
 
     public CarFlagEncoder(int speedBits, double speedFactor, int maxTurnCosts) {
         super(speedBits, speedFactor, maxTurnCosts);
         restrictions.addAll(Arrays.asList("motorcar", "motor_vehicle", "vehicle", "access"));
-        restrictedValues.add("private");
         restrictedValues.add("agricultural");
         restrictedValues.add("forestry");
         restrictedValues.add("no");
@@ -77,6 +73,7 @@ public class CarFlagEncoder extends AbstractFlagEncoder {
         restrictedValues.add("delivery");
         restrictedValues.add("military");
         restrictedValues.add("emergency");
+        restrictedValues.add("private");
 
         intendedValues.add("yes");
         intendedValues.add("permissive");
@@ -96,10 +93,6 @@ public class CarFlagEncoder extends AbstractFlagEncoder {
         absoluteBarriers.add("block");
         absoluteBarriers.add("bus_trap");
         absoluteBarriers.add("sump_buster");
-
-        trackTypeSpeedMap.put("grade1", 20); // paved
-        trackTypeSpeedMap.put("grade2", 15); // now unpaved - gravel mixed with ...
-        trackTypeSpeedMap.put("grade3", 10); // ... hard and soft materials        
 
         badSurfaceSpeedMap.add("cobblestone");
         badSurfaceSpeedMap.add("grass_paver");
@@ -138,12 +131,19 @@ public class CarFlagEncoder extends AbstractFlagEncoder {
         // forestry stuff
         defaultSpeedMap.put("track", 15);
 
+        trackTypeSpeedMap.put("grade1", 20); // paved
+        trackTypeSpeedMap.put("grade2", 15); // now unpaved - gravel mixed with ...
+        trackTypeSpeedMap.put("grade3", 10); // ... hard and soft materials
+        trackTypeSpeedMap.put(null, defaultSpeedMap.get("track"));
+
         // limit speed on bad surfaces to 30 km/h
         badSurfaceSpeed = 30;
         maxPossibleSpeed = 140;
         speedDefault = defaultSpeedMap.get("secondary");
+    }
 
-        init();
+    public TransportationMode getTransportationMode() {
+        return TransportationMode.MOTOR_VEHICLE;
     }
 
     @Override
@@ -164,7 +164,7 @@ public class CarFlagEncoder extends AbstractFlagEncoder {
     protected double getSpeed(ReaderWay way) {
         String highwayValue = way.getTag("highway");
         if (!Helper.isEmpty(highwayValue) && way.hasTag("motorroad", "yes")
-                && highwayValue != "motorway" && highwayValue != "motorway_link") {
+                && !"motorway".equals(highwayValue) && !"motorway_link".equals(highwayValue)) {
             highwayValue = "motorroad";
         }
         Integer speed = defaultSpeedMap.get(highwayValue);
@@ -184,11 +184,6 @@ public class CarFlagEncoder extends AbstractFlagEncoder {
     }
 
     @Override
-    public boolean acceptsTurnRelation(OSMTurnRelation relation) {
-        return relation.isVehicleTypeConcernedByTurnRestriction(restrictions);
-    }
-
-    @Override
     public EncodingManager.Access getAccess(ReaderWay way) {
         // TODO: Ferries have conditionals, like opening hours or are closed during some time in the year
         String highwayValue = way.getTag("highway");
@@ -205,11 +200,8 @@ public class CarFlagEncoder extends AbstractFlagEncoder {
             return EncodingManager.Access.CAN_SKIP;
         }
 
-        if ("track".equals(highwayValue)) {
-            String tt = way.getTag("tracktype");
-            if (tt != null && !tt.equals("grade1") && !tt.equals("grade2") && !tt.equals("grade3"))
-                return EncodingManager.Access.CAN_SKIP;
-        }
+        if ("track".equals(highwayValue) && trackTypeSpeedMap.get(way.getTag("tracktype")) == null)
+            return EncodingManager.Access.CAN_SKIP;
 
         if (!defaultSpeedMap.containsKey(highwayValue))
             return EncodingManager.Access.CAN_SKIP;
@@ -236,12 +228,7 @@ public class CarFlagEncoder extends AbstractFlagEncoder {
     }
 
     @Override
-    public long handleRelationTags(long oldRelationFlags, ReaderRelation relation) {
-        return oldRelationFlags;
-    }
-
-    @Override
-    public IntsRef handleWayTags(IntsRef edgeFlags, ReaderWay way, EncodingManager.Access accept, long relationFlags) {
+    public IntsRef handleWayTags(IntsRef edgeFlags, ReaderWay way, EncodingManager.Access accept) {
         if (accept.canSkip())
             return edgeFlags;
 

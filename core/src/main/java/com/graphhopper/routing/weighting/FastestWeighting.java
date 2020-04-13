@@ -20,10 +20,12 @@ package com.graphhopper.routing.weighting;
 import com.graphhopper.routing.profiles.EnumEncodedValue;
 import com.graphhopper.routing.profiles.RoadAccess;
 import com.graphhopper.routing.util.FlagEncoder;
-import com.graphhopper.routing.util.HintsMap;
+import com.graphhopper.routing.util.spatialrules.TransportationMode;
 import com.graphhopper.util.EdgeIteratorState;
 import com.graphhopper.util.PMap;
 import com.graphhopper.util.Parameters.Routing;
+
+import static com.graphhopper.routing.weighting.TurnCostProvider.NO_TURN_COST_PROVIDER;
 
 /**
  * Calculates the fastest route with the specified vehicle (VehicleEncoder). Calculates the weight
@@ -41,25 +43,37 @@ public class FastestWeighting extends AbstractWeighting {
     private final double headingPenalty;
     private final long headingPenaltyMillis;
     private final double maxSpeed;
-    private EnumEncodedValue<RoadAccess> roadAccessEnc = null;
-    // this factor puts a penalty on roads with a "destination"-only access, see #733
-    private double roadAccessPenalty;
+    private final EnumEncodedValue<RoadAccess> roadAccessEnc;
+    // this factor puts a penalty on roads with a "destination"-only or private access, see #733 and #1936
+    private final double destinationPenalty, privatePenalty;
+
+    public FastestWeighting(FlagEncoder encoder) {
+        this(encoder, new PMap(0));
+    }
+
+    public FastestWeighting(FlagEncoder encoder, TurnCostProvider turnCostProvider) {
+        this(encoder, new PMap(0), turnCostProvider);
+    }
 
     public FastestWeighting(FlagEncoder encoder, PMap map) {
-        super(encoder);
+        this(encoder, map, NO_TURN_COST_PROVIDER);
+    }
+
+    public FastestWeighting(FlagEncoder encoder, PMap map, TurnCostProvider turnCostProvider) {
+        super(encoder, turnCostProvider);
         headingPenalty = map.getDouble(Routing.HEADING_PENALTY, Routing.DEFAULT_HEADING_PENALTY);
         headingPenaltyMillis = Math.round(headingPenalty * 1000);
         maxSpeed = encoder.getMaxSpeed() / SPEED_CONV;
 
-        if (encoder.hasEncodedValue(RoadAccess.KEY)) {
-            // ensure that we do not need to change getMinWeight, i.e. road_access_factor >= 1
-            roadAccessPenalty = checkBounds("road_access_factor", map.getDouble("road_access_factor", 10), 1, 10);
-            roadAccessEnc = encoder.getEnumEncodedValue(RoadAccess.KEY, RoadAccess.class);
-        }
-    }
+        if (!encoder.hasEncodedValue(RoadAccess.KEY))
+            throw new IllegalArgumentException("road_access is not available but expected for FastestWeighting");
 
-    public FastestWeighting(FlagEncoder encoder) {
-        this(encoder, new HintsMap(0));
+        // ensure that we do not need to change getMinWeight, i.e. road_access_factor >= 1
+        double defaultDestinationFactor = encoder.getTransportationMode() == TransportationMode.MOTOR_VEHICLE ? 10 : 1;
+        destinationPenalty = checkBounds("road_access_destination_factor", map.getDouble("road_access_destination_factor", defaultDestinationFactor), 1, 10);
+        double defaultPrivateFactor = encoder.getTransportationMode() == TransportationMode.MOTOR_VEHICLE ? 10 : 1.2;
+        privatePenalty = checkBounds("road_access_private_factor", map.getDouble("road_access_private_factor", defaultPrivateFactor), 1, 10);
+        roadAccessEnc = destinationPenalty > 1 || privatePenalty > 1 ? encoder.getEnumEncodedValue(RoadAccess.KEY, RoadAccess.class) : null;
     }
 
     @Override
@@ -68,18 +82,22 @@ public class FastestWeighting extends AbstractWeighting {
     }
 
     @Override
-    public double calcWeight(EdgeIteratorState edge, boolean reverse, int prevOrNextEdgeId) {
-        double speed = reverse ? edge.getReverse(avSpeedEnc) : edge.get(avSpeedEnc);
+    public double calcEdgeWeight(EdgeIteratorState edgeState, boolean reverse) {
+        double speed = reverse ? edgeState.getReverse(avSpeedEnc) : edgeState.get(avSpeedEnc);
         if (speed == 0)
             return Double.POSITIVE_INFINITY;
 
-        double time = edge.getDistance() / speed * SPEED_CONV;
+        double time = edgeState.getDistance() / speed * SPEED_CONV;
 
-        if (roadAccessEnc != null && edge.get(roadAccessEnc) == RoadAccess.DESTINATION)
-            time *= roadAccessPenalty;
-
+        if (roadAccessEnc != null) {
+            RoadAccess access = edgeState.get(roadAccessEnc);
+            if (access == RoadAccess.DESTINATION)
+                time *= destinationPenalty;
+            else if (access == RoadAccess.PRIVATE)
+                time *= privatePenalty;
+        }
         // add direction penalties at start/stop/via points
-        boolean unfavoredEdge = edge.get(EdgeIteratorState.UNFAVORED_EDGE);
+        boolean unfavoredEdge = edgeState.get(EdgeIteratorState.UNFAVORED_EDGE);
         if (unfavoredEdge)
             time += headingPenalty;
 
@@ -87,14 +105,14 @@ public class FastestWeighting extends AbstractWeighting {
     }
 
     @Override
-    public long calcMillis(EdgeIteratorState edgeState, boolean reverse, int prevOrNextEdgeId) {
+    public long calcEdgeMillis(EdgeIteratorState edgeState, boolean reverse) {
         // TODO move this to AbstractWeighting? see #485
         long time = 0;
         boolean unfavoredEdge = edgeState.get(EdgeIteratorState.UNFAVORED_EDGE);
         if (unfavoredEdge)
             time += headingPenaltyMillis;
 
-        return time + super.calcMillis(edgeState, reverse, prevOrNextEdgeId);
+        return time + super.calcEdgeMillis(edgeState, reverse);
     }
 
     static double checkBounds(String key, double val, double from, double to) {
