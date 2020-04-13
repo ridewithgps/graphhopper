@@ -11,6 +11,7 @@ import com.graphhopper.storage.index.EdgeIndex;
 import com.graphhopper.util.EdgeIterator;
 import com.graphhopper.util.EdgeIteratorState;
 import com.graphhopper.util.StopWatch;
+import com.graphhopper.util.Helper;
 import com.graphhopper.storage.Storable;
 import java.io.*;
 import java.util.*;
@@ -60,10 +61,12 @@ public class PopularityIndex implements Storable<PopularityIndex> {
         final EdgeInfo ei = new EdgeInfo(this.popularityFile);
         final float elapsed_ei_load = sw.stop().getSeconds();
         logger.info(String.format(Locale.ROOT,
-                                  "Loading EdgeInfo finished in %s seconds.",
+                                  "Loading EdgeInfo with %s OSM Ways finished in %s seconds.",
+                                  Helper.nf(ei.size()),
                                   elapsed_ei_load));
         sw.start();
         EdgeIterator iter =  this.graph.getAllEdges();
+        long edgesTouched = 0;
         while (iter.next()) {
             int edgeId = iter.getEdge();
             long wayId = this.edgeIndex.get(edgeId);
@@ -72,11 +75,13 @@ public class PopularityIndex implements Storable<PopularityIndex> {
 
             if (popularity != null && popularity > 0) {
                 setRawPopularity(edgeId, popularity);
+                edgesTouched += 1;
             }
         }
         final float elapsed_edge_write = sw.stop().getSeconds();
         logger.info(String.format(Locale.ROOT,
-                                  "Updating edges finished in %s seconds.",
+                                  "Updating %s edges finished in %s seconds.",
+                                  Helper.nf(edgesTouched),
                                   elapsed_edge_write));
     }
 
@@ -177,6 +182,10 @@ public class PopularityIndex implements Storable<PopularityIndex> {
 
         public Integer getPopularity(long wayId) {
             return this.popularities.get(wayId);
+        }
+
+        public int size() {
+            return this.popularities.size();
         }
     }
 }
