@@ -16,8 +16,8 @@ public class RWGPSWeighting extends PriorityWeighting {
     }
 
     @Override
-    public double calcWeight(EdgeIteratorState edgeState, boolean reverse, int prevOrNextEdgeId) {
-        double weight = super.calcWeight(edgeState, reverse, prevOrNextEdgeId);
+    public double calcEdgeWeight(EdgeIteratorState edgeState, boolean reverse) {
+        double weight = super.calcEdgeWeight(edgeState, reverse);
         double priority = bikepriorityEncoder.getDecimal(false, edgeState.getFlags());
 
         return weight * priority;

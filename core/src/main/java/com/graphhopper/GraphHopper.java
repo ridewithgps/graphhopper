@@ -1362,11 +1362,7 @@ public class GraphHopper implements GraphHopperAPI {
                     weighting = new FastestWeighting(encoder, hints, turnCostProvider);
             } else if ("rwgps".equalsIgnoreCase(weightingStr)) {
                 if (encoder.supports(RWGPSWeighting.class)) {
-                    weighting = new RWGPSWeighting(encoder, hintsMap);
-                } else if (encoder.supports(PriorityWeighting.class)) {
-                    weighting = new PriorityWeighting(encoder, hintsMap);
-                } else {
-                    weighting = new FastestWeighting(encoder);
+                    weighting = new RWGPSWeighting(encoder, hints);
                 }
             } else if ("curvature".equalsIgnoreCase(weightingStr)) {
                 if (encoder.supports(CurvatureWeighting.class))
