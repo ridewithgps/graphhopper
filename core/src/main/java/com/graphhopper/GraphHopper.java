@@ -541,6 +541,16 @@ public class GraphHopper implements GraphHopperAPI {
         else
             lockFactory = new NativeFSLockFactory();
 
+        // popularity
+        popularityFile = java.nio.file.Paths.get(ghConfig.getString("graph.popularity.file", ""));
+        if (!popularityFile.toFile().exists()) {
+            if (isEmpty(popularityFile.toString())) {
+                popularityFile = null;
+            } else {
+                throw new IllegalArgumentException("Popularity file \"" + popularityFile + "\" doesn't exist");
+            }
+        }
+
         // elevation
         this.smoothElevation = ghConfig.getBool("graph.elevation.smoothing", false);
         ElevationProvider elevationProvider = createElevationProvider(ghConfig);
@@ -606,15 +616,6 @@ public class GraphHopper implements GraphHopperAPI {
         String cacheDirStr = ghConfig.getString("graph.elevation.cache_dir", "");
         if (cacheDirStr.isEmpty())
             cacheDirStr = ghConfig.getString("graph.elevation.cachedir", "");
-
-        popularityFile = java.nio.file.Paths.get(args.get("graph.popularity.file", ""));
-        if (!popularityFile.toFile().exists()) {
-            if (isEmpty(popularityFile.toString())) {
-                popularityFile = null;
-            } else {
-                throw new IllegalArgumentException("Popularity file \"" + popularityFile + "\" doesn't exist");
-            }
-        }
 
         String baseURL = ghConfig.getString("graph.elevation.base_url", "");
         if (baseURL.isEmpty())
@@ -1022,7 +1023,7 @@ public class GraphHopper implements GraphHopperAPI {
      *                         LM preparation or Isochrones
      */
     public Weighting createWeighting(ProfileConfig profileConfig, PMap hints, boolean disableTurnCosts) {
-        return new DefaultWeightingFactory(encodingManager, ghStorage).createWeighting(profileConfig, hints, disableTurnCosts);
+        return new DefaultWeightingFactory(encodingManager, ghStorage, this).createWeighting(profileConfig, hints, disableTurnCosts);
     }
 
     @Override
@@ -1379,10 +1380,12 @@ public class GraphHopper implements GraphHopperAPI {
     private static class DefaultWeightingFactory {
         private final EncodingManager encodingManager;
         private final GraphHopperStorage ghStorage;
+        private final GraphHopper hopper;
 
-        public DefaultWeightingFactory(EncodingManager encodingManager, GraphHopperStorage ghStorage) {
+        public DefaultWeightingFactory(EncodingManager encodingManager, GraphHopperStorage ghStorage, GraphHopper hopper) {
             this.encodingManager = encodingManager;
             this.ghStorage = ghStorage;
+            this.hopper = hopper;
         }
 
         public Weighting createWeighting(ProfileConfig profile, PMap requestHints, boolean disableTurnCosts) {
@@ -1421,7 +1424,7 @@ public class GraphHopper implements GraphHopperAPI {
                     weighting = new FastestWeighting(encoder, hints, turnCostProvider);
             } else if ("rwgps".equalsIgnoreCase(weightingStr)) {
                 if (encoder.supports(RWGPSWeighting.class)) {
-                    weighting = new RWGPSWeighting(encoder, hints);
+                    weighting = new RWGPSWeighting(encoder, hints, hopper);
                 }
             } else if ("rwgpswithoutpopularity".equalsIgnoreCase(weightingStr)) {
                 if (encoder.supports(RWGPSWithoutPopularityWeighting.class)) {

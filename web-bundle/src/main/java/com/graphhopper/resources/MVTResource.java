@@ -144,7 +144,7 @@ public class MVTResource {
                     for (CHProfile profile: graphHopper.getGraphHopperStorage().getCHProfiles()) {
                         final Weighting weighting = profile.getWeighting();
                         if (weighting.getFlagEncoder().equals(encoder)) {
-                            map.put("WEIGHT " + encoder.toString() + "|" +  weighting.getName(), weighting.calcWeight(edge, false, 0));
+                            map.put("WEIGHT " + encoder.toString() + "|" +  weighting.getName(), weighting.calcEdgeWeight(edge, false));
                         }
                     }
                 }
