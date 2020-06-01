@@ -1,12 +1,17 @@
 package com.graphhopper.resources;
 
 import com.graphhopper.GraphHopper;
-import com.graphhopper.isochrone.algorithm.Isochrone;
+import com.graphhopper.config.ProfileConfig;
+import com.graphhopper.isochrone.algorithm.ShortestPathTree;
+import com.graphhopper.routing.ProfileResolver;
 import com.graphhopper.routing.profiles.*;
 import com.graphhopper.routing.querygraph.QueryGraph;
 import com.graphhopper.routing.util.*;
+import com.graphhopper.routing.weighting.BlockAreaWeighting;
 import com.graphhopper.routing.weighting.Weighting;
 import com.graphhopper.storage.Graph;
+import com.graphhopper.storage.GraphEdgeIdFinder;
+import com.graphhopper.storage.NodeAccess;
 import com.graphhopper.storage.index.LocationIndex;
 import com.graphhopper.storage.index.QueryResult;
 import com.graphhopper.util.*;
@@ -24,10 +29,10 @@ import java.io.BufferedWriter;
 import java.io.IOException;
 import java.io.OutputStreamWriter;
 import java.io.Writer;
-import java.util.Arrays;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
+import java.util.*;
+
+import static com.graphhopper.util.Parameters.Routing.EDGE_BASED;
+import static com.graphhopper.util.Parameters.Routing.TURN_COSTS;
 
 /**
  * This resource provides the entire shortest path tree as response. In a simple CSV format discussed at #1577.
@@ -37,12 +42,26 @@ public class SPTResource {
 
     private static final Logger logger = LoggerFactory.getLogger(SPTResource.class);
 
+    public static class IsoLabelWithCoordinates {
+        public final int nodeId;
+        public int edgeId, prevEdgeId, prevNodeId;
+        public int timeMillis, prevTimeMillis;
+        public int distance, prevDistance;
+        public GHPoint coordinate, prevCoordinate;
+
+        public IsoLabelWithCoordinates(int nodeId) {
+            this.nodeId = nodeId;
+        }
+    }
+
     private final GraphHopper graphHopper;
+    private final ProfileResolver profileResolver;
     private final EncodingManager encodingManager;
 
     @Inject
-    public SPTResource(GraphHopper graphHopper, EncodingManager encodingManager) {
+    public SPTResource(GraphHopper graphHopper, ProfileResolver profileResolver, EncodingManager encodingManager) {
         this.graphHopper = graphHopper;
+        this.profileResolver = profileResolver;
         this.encodingManager = encodingManager;
     }
 
@@ -50,7 +69,6 @@ public class SPTResource {
     @Produces("text/csv")
     public Response doGet(
             @Context UriInfo uriInfo,
-            @QueryParam("vehicle") @DefaultValue("car") String vehicle,
             @QueryParam("reverse_flow") @DefaultValue("false") boolean reverseFlow,
             @QueryParam("point") GHPoint point,
             @QueryParam("columns") String columnsParam,
@@ -61,11 +79,25 @@ public class SPTResource {
             throw new IllegalArgumentException("point parameter cannot be null");
 
         StopWatch sw = new StopWatch().start();
+        HintsMap hintsMap = new HintsMap();
+        RouteResource.initHints(hintsMap, uriInfo.getQueryParameters());
+        if (!hintsMap.getBool(Parameters.CH.DISABLE, true))
+            throw new IllegalArgumentException("Currently you cannot use speed mode for /spt, Do not use `ch.disable=false`");
+        if (!hintsMap.getBool(Parameters.Landmark.DISABLE, true))
+            throw new IllegalArgumentException("Currently you cannot use hybrid mode for /spt, Do not use `lm.disable=false`");
+        if (hintsMap.getBool(Parameters.Routing.EDGE_BASED, false))
+            throw new IllegalArgumentException("Currently you cannot use edge-based for /spt. Do not use `edge_based=true`");
+        if (hintsMap.getBool(Parameters.Routing.TURN_COSTS, false))
+            throw new IllegalArgumentException("Currently you cannot use turn costs for /spt, Do not use `turn_costs=true`");
 
-        if (!encodingManager.hasEncoder(vehicle))
-            throw new IllegalArgumentException("vehicle not supported:" + vehicle);
-
-        FlagEncoder encoder = encodingManager.getEncoder(vehicle);
+        hintsMap.putObject(Parameters.CH.DISABLE, true);
+        hintsMap.putObject(Parameters.Landmark.DISABLE, true);
+        // ignore these parameters for profile selection, because we fall back to node-based without turn costs so far
+        hintsMap.remove(TURN_COSTS);
+        hintsMap.remove(EDGE_BASED);
+        // todo: #1934, only try to resolve the profile if no profile is given!
+        ProfileConfig profile = profileResolver.resolveProfile(hintsMap);
+        FlagEncoder encoder = encodingManager.getEncoder(profile.getVehicle());
         EdgeFilter edgeFilter = DefaultEdgeFilter.allEdges(encoder);
         LocationIndex locationIndex = graphHopper.getLocationIndex();
         QueryResult qr = locationIndex.findClosest(point.lat, point.lon, edgeFilter);
@@ -74,16 +106,21 @@ public class SPTResource {
 
         Graph graph = graphHopper.getGraphHopperStorage();
         QueryGraph queryGraph = QueryGraph.lookup(graph, qr);
-        HintsMap hintsMap = new HintsMap();
-        RouteResource.initHints(hintsMap, uriInfo.getQueryParameters());
+        NodeAccess nodeAccess = queryGraph.getNodeAccess();
 
-        Weighting weighting = graphHopper.createWeighting(hintsMap, encoder, graph);
-        Isochrone isochrone = new Isochrone(queryGraph, weighting, reverseFlow);
+        // have to disable turn costs, as isochrones are running node-based
+        Weighting weighting = graphHopper.createWeighting(profile, hintsMap, true);
+        if (hintsMap.has(Parameters.Routing.BLOCK_AREA))
+            weighting = new BlockAreaWeighting(weighting, GraphEdgeIdFinder.createBlockArea(graph, locationIndex,
+                    Collections.singletonList(point), hintsMap, DefaultEdgeFilter.allEdges(encoder)));
+
+        ShortestPathTree shortestPathTree = new ShortestPathTree(queryGraph, weighting, reverseFlow);
 
         if (distanceInMeter > 0) {
-            isochrone.setDistanceLimit(distanceInMeter);
+            shortestPathTree.setDistanceLimit(distanceInMeter + Math.max(distanceInMeter * 0.14, 2_000));
         } else {
-            isochrone.setTimeLimit(timeLimitInSeconds);
+            double limit = timeLimitInSeconds * 1000;
+            shortestPathTree.setTimeLimit(limit + Math.max(limit * 0.14, 200_000));
         }
 
         final String COL_SEP = ",", LINE_SEP = "\n";
@@ -112,7 +149,8 @@ public class SPTResource {
                 }
                 sb.append(LINE_SEP);
                 writer.write(sb.toString());
-                isochrone.search(qr.getClosestNode(), label -> {
+                shortestPathTree.search(qr.getClosestNode(), l -> {
+                    IsoLabelWithCoordinates label = isoLabelWithCoordinates(nodeAccess, l);
                     sb.setLength(0);
                     for (int colIndex = 0; colIndex < columns.size(); colIndex++) {
                         String col = columns.get(colIndex);
@@ -195,12 +233,34 @@ public class SPTResource {
                     }
                 });
 
-                logger.info("took: " + sw.stop().getSeconds() + ", visited nodes:" + isochrone.getVisitedNodes() + ", " + uriInfo.getQueryParameters());
+                logger.info("took: " + sw.stop().getSeconds() + ", visited nodes:" + shortestPathTree.getVisitedNodes() + ", " + uriInfo.getQueryParameters());
             } catch (IOException e) {
                 throw new RuntimeException(e);
             }
         };
         // took header does not make sense as we stream
         return Response.ok(out).build();
+    }
+
+    private IsoLabelWithCoordinates isoLabelWithCoordinates(NodeAccess na, ShortestPathTree.IsoLabel label) {
+        double lat = na.getLatitude(label.adjNode);
+        double lon = na.getLongitude(label.adjNode);
+        IsoLabelWithCoordinates isoLabelWC = new IsoLabelWithCoordinates(label.adjNode);
+        isoLabelWC.coordinate = new GHPoint(lat, lon);
+        isoLabelWC.timeMillis = Math.round(label.time);
+        isoLabelWC.distance = (int) Math.round(label.distance);
+        isoLabelWC.edgeId = label.edge;
+        if (label.parent != null) {
+            ShortestPathTree.IsoLabel prevLabel = (ShortestPathTree.IsoLabel) label.parent;
+            int prevNodeId = prevLabel.adjNode;
+            double prevLat = na.getLatitude(prevNodeId);
+            double prevLon = na.getLongitude(prevNodeId);
+            isoLabelWC.prevNodeId = prevNodeId;
+            isoLabelWC.prevEdgeId = prevLabel.edge;
+            isoLabelWC.prevCoordinate = new GHPoint(prevLat, prevLon);
+            isoLabelWC.prevDistance = (int) Math.round(prevLabel.distance);
+            isoLabelWC.prevTimeMillis = Math.round(prevLabel.time);
+        }
+        return isoLabelWC;
     }
 }

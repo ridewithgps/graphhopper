@@ -5,7 +5,7 @@
 ## Try out
 
 For a start which requires only the JRE have a look [here](../web/quickstart.md). 
-Windows user can find a quick guide [here](./windows-setup.md).
+Windows users will need Cygwin - find more details [here](./windows-setup.md).
 
 To proceed install `git` and `openjdk8` or `openjdk11`. Get the a jdk from your package manager, 
 [AdoptOpenJDK](https://adoptopenjdk.net/) or [Red Hat](https://github.com/ojdkbuild/ojdkbuild/releases).
@@ -58,7 +58,7 @@ Then open the project in your IDE, first class IDEs are NetBeans and IntelliJ wh
 Go to `Run->Edit Configurations...` and set the following to run GraphHopper from within IntelliJ:
 ```
 Main class: com.graphhopper.http.GraphHopperApplication
-VM options: -Xms1g -Xmx1g -server -Dgraphhopper.datareader.file=[your-area].osm.pbf -Dgraphhopper.graph.location=./[your-area].osm-gh
+VM options: -Xms1g -Xmx1g -server -Ddw.graphhopper.datareader.file=[your-area].osm.pbf -Ddw.graphhopper.graph.location=./[your-area].osm-gh
 Program arguments: server config.yml
 ```
 

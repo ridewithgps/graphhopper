@@ -20,13 +20,11 @@ package com.graphhopper.routing.util;
 import com.graphhopper.reader.ReaderWay;
 import com.graphhopper.routing.weighting.PriorityWeighting;
 import com.graphhopper.storage.IntsRef;
-import com.graphhopper.util.EdgeIteratorState;
-import com.graphhopper.util.Helper;
-import com.graphhopper.util.PMap;
-import com.graphhopper.util.PointList;
+import com.graphhopper.util.*;
 
 import java.util.TreeMap;
 
+import static com.graphhopper.routing.profiles.RouteNetwork.*;
 import static com.graphhopper.routing.util.PriorityCode.*;
 
 /**
@@ -35,94 +33,37 @@ import static com.graphhopper.routing.util.PriorityCode.*;
  * @author Peter Karich
  */
 public class HikeFlagEncoder extends FootFlagEncoder {
-    /**
-     * Should be only instantiated via EncodingManager
-     */
+
     public HikeFlagEncoder() {
         this(4, 1);
     }
 
     public HikeFlagEncoder(PMap properties) {
-        this((int) properties.getLong("speed_bits", 4),
-                properties.getDouble("speed_factor", 1));
-        this.setBlockFords(properties.getBool("block_fords", false));
+        this(properties.getInt("speed_bits", 4), properties.getDouble("speed_factor", 1));
+
+        blockPrivate(properties.getBool("block_private", true));
+        blockFords(properties.getBool("block_fords", false));
+        blockBarriersByDefault(properties.getBool("block_barriers", false));
+        speedTwoDirections = properties.getBool("speed_two_directions", false);
     }
 
-    public HikeFlagEncoder(String propertiesStr) {
-        this(new PMap(propertiesStr));
-    }
-
-    public HikeFlagEncoder(int speedBits, double speedFactor) {
+    protected HikeFlagEncoder(int speedBits, double speedFactor) {
         super(speedBits, speedFactor);
 
-        hikingNetworkToCode.put("iwn", BEST.getValue());
-        hikingNetworkToCode.put("nwn", BEST.getValue());
-        hikingNetworkToCode.put("rwn", VERY_NICE.getValue());
-        hikingNetworkToCode.put("lwn", VERY_NICE.getValue());
+        routeMap.put(INTERNATIONAL, BEST.getValue());
+        routeMap.put(NATIONAL, BEST.getValue());
+        routeMap.put(REGIONAL, VERY_NICE.getValue());
+        routeMap.put(LOCAL, VERY_NICE.getValue());
 
-        init();
+        // hiking allows all sac_scale values
+        allowedSacScale.add("alpine_hiking");
+        allowedSacScale.add("demanding_alpine_hiking");
+        allowedSacScale.add("difficult_alpine_hiking");
     }
 
     @Override
     public int getVersion() {
         return 3;
-    }
-
-    @Override
-    public EncodingManager.Access getAccess(ReaderWay way) {
-        String highwayValue = way.getTag("highway");
-        if (highwayValue == null) {
-            EncodingManager.Access acceptPotentially = EncodingManager.Access.CAN_SKIP;
-
-            if (way.hasTag("route", ferries)) {
-                String footTag = way.getTag("foot");
-                if (footTag == null || "yes".equals(footTag))
-                    acceptPotentially = EncodingManager.Access.FERRY;
-            }
-
-            // special case not for all acceptedRailways, only platform
-            if (way.hasTag("railway", "platform"))
-                acceptPotentially = EncodingManager.Access.WAY;
-
-            if (way.hasTag("man_made", "pier"))
-                acceptPotentially = EncodingManager.Access.WAY;
-
-            if (!acceptPotentially.canSkip()) {
-                if (way.hasTag(restrictions, restrictedValues) && !getConditionalTagInspector().isRestrictedWayConditionallyPermitted(way))
-                    return EncodingManager.Access.CAN_SKIP;
-                return acceptPotentially;
-            }
-
-            return EncodingManager.Access.CAN_SKIP;
-        }
-
-        // no need to evaluate ferries or fords - already included here
-        if (way.hasTag("foot", intendedValues))
-            return EncodingManager.Access.WAY;
-
-        // check access restrictions
-        if (way.hasTag(restrictions, restrictedValues) && !getConditionalTagInspector().isRestrictedWayConditionallyPermitted(way))
-            return EncodingManager.Access.CAN_SKIP;
-
-        // hiking allows all sac_scale values
-        // String sacScale = way.getTag("sac_scale");
-        if (way.hasTag("sidewalk", sidewalkValues))
-            return EncodingManager.Access.WAY;
-
-        if (!allowedHighwayTags.contains(highwayValue))
-            return EncodingManager.Access.CAN_SKIP;
-
-        if (way.hasTag("motorroad", "yes"))
-            return EncodingManager.Access.CAN_SKIP;
-
-        // do not get our feet wet, "yes" is already included above
-        if (isBlockFords() && (way.hasTag("highway", "ford") || way.hasTag("ford")))
-            return EncodingManager.Access.CAN_SKIP;
-
-        if (getConditionalTagInspector().isPermittedWayConditionallyRestricted(way))
-            return EncodingManager.Access.CAN_SKIP;
-        else
-            return EncodingManager.Access.WAY;
     }
 
     @Override
@@ -154,7 +95,7 @@ public class HikeFlagEncoder extends FootFlagEncoder {
 
     @Override
     public void applyWayTags(ReaderWay way, EdgeIteratorState edge) {
-        PointList pl = edge.fetchWayGeometry(3);
+        PointList pl = edge.fetchWayGeometry(FetchMode.ALL);
         if (!pl.is3D())
             return;
 

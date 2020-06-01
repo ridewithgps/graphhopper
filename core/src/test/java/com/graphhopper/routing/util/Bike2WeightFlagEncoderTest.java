@@ -32,7 +32,7 @@ public class Bike2WeightFlagEncoderTest extends BikeFlagEncoderTest {
 
     @Override
     protected BikeCommonFlagEncoder createBikeEncoder() {
-        return new Bike2WeightFlagEncoder();
+        return new Bike2WeightFlagEncoder(new PMap("block_fords=true"));
     }
 
     private Graph initExampleGraph() {
@@ -98,8 +98,7 @@ public class Bike2WeightFlagEncoderTest extends BikeFlagEncoderTest {
 
         EncodingManager.AcceptWay map = new EncodingManager.AcceptWay();
         assertTrue(encodingManager.acceptWay(way, map));
-        long relationFlags = 0;
-        IntsRef wayFlags = encodingManager.handleWayTags(way, map, relationFlags);
+        IntsRef wayFlags = encodingManager.handleWayTags(way, map, encodingManager.createRelationFlags());
         graph.edge(0, 1).setDistance(247).setFlags(wayFlags);
 
         assertTrue(isGraphValid(graph, encoder));

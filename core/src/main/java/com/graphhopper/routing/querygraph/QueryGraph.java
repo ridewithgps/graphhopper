@@ -22,7 +22,12 @@ import com.carrotsearch.hppc.procedures.IntObjectProcedure;
 import com.graphhopper.coll.GHIntObjectHashMap;
 import com.graphhopper.routing.util.AllEdgesIterator;
 import com.graphhopper.routing.util.EdgeFilter;
-import com.graphhopper.storage.*;
+import com.graphhopper.routing.weighting.QueryGraphWeighting;
+import com.graphhopper.routing.weighting.Weighting;
+import com.graphhopper.storage.ExtendedNodeAccess;
+import com.graphhopper.storage.Graph;
+import com.graphhopper.storage.NodeAccess;
+import com.graphhopper.storage.TurnCostStorage;
 import com.graphhopper.storage.index.QueryResult;
 import com.graphhopper.util.*;
 import com.graphhopper.util.shapes.BBox;
@@ -50,14 +55,12 @@ public class QueryGraph implements Graph {
     private final int mainEdges;
     // todo: why do we need this and do we still need it when we stop wrapping CHGraph with QueryGraph ?
     private final QueryGraph baseGraph;
-    private final TurnCostExtension wrappedExtension;
-    private final Map<EdgeFilter, EdgeExplorer> cacheMap = new HashMap<>(4);
+    private final TurnCostStorage turnCostStorage;
     private final NodeAccess nodeAccess;
     private final GraphModification graphModification;
 
     // Use LinkedHashSet for predictable iteration order.
     private final Set<VirtualEdgeIteratorState> unfavoredEdges = new LinkedHashSet<>(5);
-    private boolean useEdgeExplorerCache = false;
     private final IntObjectMap<List<EdgeIteratorState>> virtualEdgesAtRealNodes;
     private final List<List<EdgeIteratorState>> virtualEdgesAtVirtualNodes;
 
@@ -80,11 +83,7 @@ public class QueryGraph implements Graph {
 
         graphModification = GraphModificationBuilder.build(graph, queryResults);
         nodeAccess = new ExtendedNodeAccess(graph.getNodeAccess(), graphModification.getVirtualNodes(), mainNodes);
-
-        if (mainGraph.getTurnCostExtension() != null)
-            wrappedExtension = new QueryGraphTurnExt(mainGraph, graphModification.getClosestEdges());
-        else
-            wrappedExtension = null;
+        turnCostStorage = mainGraph.getTurnCostStorage();
 
         // build data structures holding the virtual edges at all real/virtual nodes that are modified compared to the
         // mainGraph.
@@ -93,14 +92,7 @@ public class QueryGraph implements Graph {
         virtualEdgesAtVirtualNodes = buildVirtualEdgesAtVirtualNodes();
 
         // create very lightweight QueryGraph which uses variables from this QueryGraph (same virtual edges)
-        baseGraph = new QueryGraph(graph.getBaseGraph(), this) {
-            // override method to avoid stackoverflow
-            @Override
-            public QueryGraph setUseEdgeExplorerCache(boolean useEECache) {
-                baseGraph.useEdgeExplorerCache = useEECache;
-                return baseGraph;
-            }
-        };
+        baseGraph = new QueryGraph(graph.getBaseGraph(), this);
     }
 
     /**
@@ -109,7 +101,7 @@ public class QueryGraph implements Graph {
     private QueryGraph(Graph graph, QueryGraph superQueryGraph) {
         mainGraph = graph;
         baseGraph = this;
-        wrappedExtension = superQueryGraph.wrappedExtension;
+        turnCostStorage = superQueryGraph.turnCostStorage;
         mainNodes = superQueryGraph.mainNodes;
         mainEdges = superQueryGraph.mainEdges;
         graphModification = superQueryGraph.graphModification;
@@ -126,30 +118,12 @@ public class QueryGraph implements Graph {
         return baseGraph;
     }
 
-    public EdgeIteratorState getOriginalEdgeFromVirtNode(int nodeId) {
-        return getEdgeIteratorState(graphModification.getClosestEdges().get(nodeId - mainNodes), Integer.MIN_VALUE);
-    }
-
     public boolean isVirtualEdge(int edgeId) {
         return edgeId >= mainEdges;
     }
 
     public boolean isVirtualNode(int nodeId) {
         return nodeId >= mainNodes;
-    }
-
-    /**
-     * This method is an experimental feature to reduce memory and CPU resources if there are many
-     * locations ("hundreds") for one QueryGraph. EdgeExplorer instances are cached based on the {@link EdgeFilter}
-     * passed into {@link #createEdgeExplorer(EdgeFilter)}. For equal (in the java sense) {@link EdgeFilter}s always
-     * the same {@link EdgeExplorer} will be returned when caching is enabled. Care has to be taken for example for
-     * custom or threaded algorithms, when using custom {@link EdgeFilter}s, or when the same edge explorer is used
-     * with different vehicles/encoders.
-     */
-    public QueryGraph setUseEdgeExplorerCache(boolean useEECache) {
-        this.useEdgeExplorerCache = useEECache;
-        this.baseGraph.setUseEdgeExplorerCache(useEECache);
-        return this;
     }
 
     /**
@@ -178,7 +152,7 @@ public class QueryGraph implements Graph {
         for (int edgePos : edgePositions) {
             VirtualEdgeIteratorState edge = getVirtualEdge(virtNodeIDintern * 4 + edgePos);
 
-            PointList wayGeo = edge.fetchWayGeometry(3);
+            PointList wayGeo = edge.fetchWayGeometry(FetchMode.ALL);
             double edgeOrientation;
             if (incoming) {
                 int numWayPoints = wayGeo.getSize();
@@ -297,29 +271,11 @@ public class QueryGraph implements Graph {
 
     private int getPosOfReverseEdge(int edgeId) {
         // find reverse edge via convention. see virtualEdges comment above
-        if (edgeId % 2 == 0)
-            edgeId++;
-        else
-            edgeId--;
-
-        return edgeId;
+        return edgeId % 2 == 0 ? edgeId + 1 : edgeId - 1;
     }
 
     @Override
     public EdgeExplorer createEdgeExplorer(final EdgeFilter edgeFilter) {
-        if (useEdgeExplorerCache) {
-            EdgeExplorer cached = cacheMap.get(edgeFilter);
-            if (cached == null) {
-                cached = createUncachedEdgeExplorer(edgeFilter);
-                cacheMap.put(edgeFilter, cached);
-            }
-            return cached;
-        } else {
-            return createUncachedEdgeExplorer(edgeFilter);
-        }
-    }
-
-    private EdgeExplorer createUncachedEdgeExplorer(final EdgeFilter edgeFilter) {
         // re-use these objects between setBaseNode calls to prevent GC
         final EdgeExplorer mainExplorer = mainGraph.createEdgeExplorer(edgeFilter);
         final VirtualEdgeIterator virtualEdgeIterator = new VirtualEdgeIterator(edgeFilter, null);
@@ -399,8 +355,13 @@ public class QueryGraph implements Graph {
     }
 
     @Override
-    public TurnCostExtension getTurnCostExtension() {
-        return wrappedExtension;
+    public TurnCostStorage getTurnCostStorage() {
+        return turnCostStorage;
+    }
+
+    @Override
+    public Weighting wrapWeighting(Weighting weighting) {
+        return new QueryGraphWeighting(weighting, mainGraph.getNodes(), mainGraph.getEdges(), graphModification.getClosestEdges());
     }
 
     @Override
@@ -428,4 +389,7 @@ public class QueryGraph implements Graph {
         return new UnsupportedOperationException("QueryGraph cannot be modified.");
     }
 
+    public Graph getMainGraph() {
+        return mainGraph;
+    }
 }

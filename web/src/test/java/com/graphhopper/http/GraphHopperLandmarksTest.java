@@ -18,7 +18,10 @@
 package com.graphhopper.http;
 
 import com.fasterxml.jackson.databind.JsonNode;
-import com.graphhopper.util.CmdArgs;
+import com.graphhopper.config.CHProfileConfig;
+import com.graphhopper.config.LMProfileConfig;
+import com.graphhopper.config.ProfileConfig;
+import com.graphhopper.http.util.GraphHopperServerTestConfiguration;
 import com.graphhopper.util.Helper;
 import io.dropwizard.testing.junit.DropwizardAppRule;
 import org.junit.AfterClass;
@@ -27,7 +30,9 @@ import org.junit.Test;
 
 import javax.ws.rs.core.Response;
 import java.io.File;
+import java.util.Collections;
 
+import static com.graphhopper.http.util.TestUtils.clientTarget;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertTrue;
 
@@ -39,24 +44,32 @@ import static org.junit.Assert.assertTrue;
 public class GraphHopperLandmarksTest {
     private static final String DIR = "./target/landmark-test-gh/";
 
-    private static final GraphHopperServerConfiguration config = new GraphHopperServerConfiguration();
+    private static final GraphHopperServerTestConfiguration config = new GraphHopperServerTestConfiguration();
 
     static {
-        config.getGraphHopperConfiguration().merge(new CmdArgs().
-                put("graph.flag_encoders", "car").
-                put("prepare.ch.weightings", "fastest").
-                put("prepare.lm.weightings", "fastest").
-                put("datareader.file", "../core/files/belarus-east.osm.gz").
-                put("prepare.min_network_size", 0).
-                put("prepare.min_one_way_network_size", 0).
-                put("routing.ch.disabling_allowed", true).
-                put("routing.lm.disabling_allowed", true).
-                put("graph.location", DIR).
-                put("prepare.lm.min_network_size", 2)); // force landmark creation even for tiny networks
+        config.getGraphHopperConfiguration().
+                putObject("graph.flag_encoders", "car").
+                putObject("datareader.file", "../core/files/belarus-east.osm.gz").
+                putObject("prepare.min_network_size", 0).
+                putObject("prepare.min_one_way_network_size", 0).
+                putObject("routing.ch.disabling_allowed", true).
+                putObject("routing.lm.disabling_allowed", true).
+                putObject("graph.location", DIR)
+                // force landmark creation even for tiny networks
+                .putObject("prepare.lm.min_network_size", 2)
+                .setProfiles(Collections.singletonList(
+                        new ProfileConfig("car_profile").setVehicle("car").setWeighting("fastest")
+                ))
+                .setCHProfiles(Collections.singletonList(
+                        new CHProfileConfig("car_profile")
+                ))
+                .setLMProfiles(Collections.singletonList(
+                        new LMProfileConfig("car_profile")
+                ));
     }
 
     @ClassRule
-    public static final DropwizardAppRule<GraphHopperServerConfiguration> app = new DropwizardAppRule(
+    public static final DropwizardAppRule<GraphHopperServerTestConfiguration> app = new DropwizardAppRule(
             GraphHopperApplication.class, config);
 
     @AfterClass
@@ -65,31 +78,31 @@ public class GraphHopperLandmarksTest {
     }
 
     @Test
-    public void testQueries() throws Exception {
-        Response response = app.client().target("http://localhost:8080/route?point=55.99022,29.129734&point=56.001069,29.150848").request().buildGet().invoke();
+    public void testQueries() {
+        Response response = clientTarget(app, "/route?point=55.99022,29.129734&point=56.001069,29.150848").request().buildGet().invoke();
         assertEquals(200, response.getStatus());
         JsonNode json = response.readEntity(JsonNode.class);
         JsonNode path = json.get("paths").get(0);
         double distance = path.get("distance").asDouble();
         assertEquals("distance wasn't correct:" + distance, 1870, distance, 100);
 
-        response = app.client().target("http://localhost:8080/route?point=55.99022,29.129734&point=56.001069,29.150848&ch.disable=true").request().buildGet().invoke();
+        response = clientTarget(app, "route?point=55.99022,29.129734&point=56.001069,29.150848&ch.disable=true").request().buildGet().invoke();
         json = response.readEntity(JsonNode.class);
         distance = json.get("paths").get(0).get("distance").asDouble();
         assertEquals("distance wasn't correct:" + distance, 1870, distance, 100);
     }
 
     @Test
-    public void testLandmarkDisconnect() throws Exception {
+    public void testLandmarkDisconnect() {
         // if one algorithm is disabled then the following chain is executed: CH -> LM -> flexible
         // disconnected for landmarks
-        Response response = app.client().target("http://localhost:8080/route?" + "point=55.99022,29.129734&point=56.007787,29.208355&ch.disable=true").request().buildGet().invoke();
+        Response response = clientTarget(app, "route?point=55.99022,29.129734&point=56.007787,29.208355&ch.disable=true").request().buildGet().invoke();
         assertEquals(400, response.getStatus());
         JsonNode json = response.readEntity(JsonNode.class);
         assertTrue(json.get("message").toString().contains("Different subnetworks"));
 
         // without landmarks it should work
-        response = app.client().target("http://localhost:8080/route?" + "point=55.99022,29.129734&point=56.007787,29.208355&ch.disable=true&lm.disable=true").request().buildGet().invoke();
+        response = clientTarget(app, "route?point=55.99022,29.129734&point=56.007787,29.208355&ch.disable=true&lm.disable=true").request().buildGet().invoke();
         assertEquals(200, response.getStatus());
         json = response.readEntity(JsonNode.class);
         double distance = json.get("paths").get(0).get("distance").asDouble();

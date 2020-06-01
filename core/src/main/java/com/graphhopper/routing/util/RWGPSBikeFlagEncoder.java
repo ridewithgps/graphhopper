@@ -1,28 +1,24 @@
 package com.graphhopper.routing.util;
 
 import com.graphhopper.reader.ReaderWay;
-import com.graphhopper.util.EdgeIteratorState;
-import com.graphhopper.util.PMap;
-import com.graphhopper.util.PointList;
-import com.graphhopper.util.Helper;
-import com.graphhopper.routing.profiles.EncodedValue;
 import com.graphhopper.routing.profiles.DecimalEncodedValue;
+import com.graphhopper.routing.profiles.EncodedValue;
+import com.graphhopper.routing.profiles.RouteNetwork;
 import com.graphhopper.routing.profiles.UnsignedDecimalEncodedValue;
 import com.graphhopper.routing.util.EncodingManager;
 import com.graphhopper.routing.weighting.RWGPSWeighting;
 import com.graphhopper.storage.IntsRef;
-import static com.graphhopper.routing.util.PriorityCode.*;
-
-import java.util.TreeMap;
+import com.graphhopper.util.Helper;
+import com.graphhopper.util.PMap;
 import java.util.List;
-
+import java.util.TreeMap;
+import static com.graphhopper.routing.util.PriorityCode.*;
 
 public class RWGPSBikeFlagEncoder extends BikeFlagEncoder {
     private DecimalEncodedValue priorityEncoder;
 
     public RWGPSBikeFlagEncoder(PMap properties) {
         super(properties);
-        setCyclingNetworkPreference("mtb", AVOID_IF_POSSIBLE.getValue());
     }
 
     @Override
@@ -41,9 +37,20 @@ public class RWGPSBikeFlagEncoder extends BikeFlagEncoder {
     }
 
     @Override
-    void handleBikeRelated(IntsRef edgeFlags, ReaderWay way, boolean partOfCycleRelation) {
-        super.handleBikeRelated(edgeFlags, way, partOfCycleRelation);
+    public IntsRef handleWayTags(IntsRef edgeFlags, ReaderWay way, EncodingManager.Access access) {
+        IntsRef flags = super.handleWayTags(edgeFlags, way, access);
+        RouteNetwork network = bikeRouteEnc.getEnum(false, flags);
+        boolean partOfCycleRelation = RouteNetwork.INTERNATIONAL.equals(network) ||
+            RouteNetwork.NATIONAL.equals(network) ||
+            RouteNetwork.REGIONAL.equals(network) ||
+            RouteNetwork.LOCAL.equals(network);
 
+        priorityEncoder.setDecimal(false, flags, calcCost(way, partOfCycleRelation));
+
+        return flags;
+    }
+
+    double calcCost(ReaderWay way, boolean partOfCycleRelation) {
         double cost = 0.6;
 
         if (isBikePath(way)) {
@@ -115,7 +122,7 @@ public class RWGPSBikeFlagEncoder extends BikeFlagEncoder {
             }
         }
 
-        priorityEncoder.setDecimal(false, edgeFlags, cost);
+        return cost;
     }
 
     @Override

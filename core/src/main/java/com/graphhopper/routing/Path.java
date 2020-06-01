@@ -24,6 +24,7 @@ import com.graphhopper.storage.Graph;
 import com.graphhopper.storage.NodeAccess;
 import com.graphhopper.util.EdgeIterator;
 import com.graphhopper.util.EdgeIteratorState;
+import com.graphhopper.util.FetchMode;
 import com.graphhopper.util.PointList;
 
 import java.util.ArrayList;
@@ -40,11 +41,11 @@ import java.util.List;
  * @author easbar
  */
 public class Path {
-    protected Graph graph;
-    protected double distance;
-    protected boolean reverseOrder = true;
-    protected long time;
-    protected int endNode = -1;
+    Graph graph;
+    double distance;
+    long time;
+    int endNode = -1;
+    private boolean reverseOrder = true;
     private List<String> description;
     private boolean found;
     private int fromNode = -1;
@@ -281,7 +282,7 @@ public class Path {
         forEveryEdge(new EdgeVisitor() {
             @Override
             public void next(EdgeIteratorState eb, int index, int prevEdgeId) {
-                PointList pl = eb.fetchWayGeometry(2);
+                PointList pl = eb.fetchWayGeometry(FetchMode.PILLAR_AND_ADJ);
                 for (int j = 0; j < pl.getSize(); j++) {
                     points.add(pl, j);
                 }

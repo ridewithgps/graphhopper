@@ -70,13 +70,13 @@ public class GHUtilityTest {
 
     double getLengthOfAllEdges(Graph graph) {
         double distance = 0;
-        DistanceCalc calc = new DistanceCalc2D();
+        DistanceCalc calc = new DistanceCalcEuclidean();
         AllEdgesIterator iter = graph.getAllEdges();
         while (iter.next()) {
             // This is meant to verify that all of the same edges (including tower nodes)
             // are included in the copied graph. Can not use iter.getDistance() since it
             // does not verify new geometry. See #1732
-            distance += iter.fetchWayGeometry(3).calcDistance(calc);
+            distance += iter.fetchWayGeometry(FetchMode.ALL).calcDistance(calc);
         }
         return distance;
     }
@@ -145,7 +145,7 @@ public class GHUtilityTest {
         newStore.freeze();
 
         edgeState = GHUtility.getEdge(lg, 5, 6);
-        assertEquals(Helper.createPointList(-1, 3, 12, 10), edgeState.fetchWayGeometry(0));
+        assertEquals(Helper.createPointList(-1, 3, 12, 10), edgeState.fetchWayGeometry(FetchMode.PILLAR_ONLY));
 
         NodeAccess na = lg.getNodeAccess();
         assertEquals(0, na.getLatitude(0), 1e-6);

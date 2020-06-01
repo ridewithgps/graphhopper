@@ -23,7 +23,6 @@ import com.graphhopper.routing.profiles.BooleanEncodedValue;
 import com.graphhopper.routing.profiles.DecimalEncodedValue;
 import com.graphhopper.routing.profiles.EncodedValue;
 import com.graphhopper.routing.profiles.Roundabout;
-import com.graphhopper.routing.util.parsers.OSMRoadAccessParser;
 import com.graphhopper.routing.weighting.FastestWeighting;
 import com.graphhopper.storage.IntsRef;
 import com.graphhopper.util.GHUtility;
@@ -42,14 +41,18 @@ import static org.junit.Assert.*;
  * @author Peter Karich
  */
 public class CarFlagEncoderTest {
+    final CarFlagEncoder encoder = createEncoder();
     private final EncodingManager em = new EncodingManager.Builder().
-            add(new OSMRoadAccessParser()).
-            add(new CarFlagEncoder(new PMap("speed_two_directions=true"))).
+            add(encoder).
             add(new BikeFlagEncoder()).add(new FootFlagEncoder()).build();
-    private final CarFlagEncoder encoder = (CarFlagEncoder) em.getEncoder("car");
+
     private final BooleanEncodedValue roundaboutEnc = em.getBooleanEncodedValue(Roundabout.KEY);
     private final DecimalEncodedValue avSpeedEnc = encoder.getAverageSpeedEnc();
     private final BooleanEncodedValue accessEnc = encoder.getAccessEnc();
+
+    CarFlagEncoder createEncoder() {
+        return new CarFlagEncoder(new PMap("speed_two_directions=true|block_fords=true"));
+    }
 
     @Test
     public void testAccess() {
@@ -168,14 +171,10 @@ public class CarFlagEncoderTest {
         assertTrue(encoder.getAccess(way).canSkip());
         assertTrue(encoder.handleNodeTags(node) > 0);
 
-        try {
-            // Now they are passable
-            encoder.setBlockFords(false);
-            assertTrue(encoder.getAccess(way).isWay());
-            assertFalse(encoder.handleNodeTags(node) > 0);
-        } finally {
-            encoder.setBlockFords(true);
-        }
+        CarFlagEncoder tmpEncoder = new CarFlagEncoder(new PMap("block_fords=false"));
+        EncodingManager.create(tmpEncoder);
+        assertTrue(tmpEncoder.getAccess(way).isWay());
+        assertFalse(tmpEncoder.handleNodeTags(node) > 0);
     }
 
     @Test
@@ -212,21 +211,64 @@ public class CarFlagEncoderTest {
         way.clearTags();
     }
 
-
     @Test
     public void testDestinationTag() {
+        IntsRef relFlags = em.createRelationFlags();
+
         FastestWeighting weighting = new FastestWeighting(encoder);
+        FastestWeighting bikeWeighting = new FastestWeighting(em.getEncoder("bike"));
 
         ReaderWay way = new ReaderWay(1);
         way.setTag("highway", "secondary");
         EncodingManager.AcceptWay acceptWay = new EncodingManager.AcceptWay();
         assertTrue(em.acceptWay(way, acceptWay));
-        IntsRef edgeFlags = em.handleWayTags(way, acceptWay, 0);
-        assertEquals(60, weighting.calcWeight(GHUtility.createMockedEdgeIteratorState(1000, edgeFlags), false, -1), 0.1);
+        IntsRef edgeFlags = em.handleWayTags(way, acceptWay, relFlags);
+        assertEquals(60, weighting.calcEdgeWeight(GHUtility.createMockedEdgeIteratorState(1000, edgeFlags), false), 0.1);
+        assertEquals(200, bikeWeighting.calcEdgeWeight(GHUtility.createMockedEdgeIteratorState(1000, edgeFlags), false), 0.1);
 
+        // no change for bike!
+        way.setTag("motor_vehicle", "destination");
+        edgeFlags = em.handleWayTags(way, acceptWay, relFlags);
+        assertEquals(600, weighting.calcEdgeWeight(GHUtility.createMockedEdgeIteratorState(1000, edgeFlags), false), 0.1);
+        assertEquals(200, bikeWeighting.calcEdgeWeight(GHUtility.createMockedEdgeIteratorState(1000, edgeFlags), false), 0.1);
+
+        way = new ReaderWay(1);
+        way.setTag("highway", "secondary");
         way.setTag("vehicle", "destination");
-        edgeFlags = em.handleWayTags(way, acceptWay, 0);
-        assertEquals(600, weighting.calcWeight(GHUtility.createMockedEdgeIteratorState(1000, edgeFlags), false, -1), 0.1);
+        edgeFlags = em.handleWayTags(way, acceptWay, relFlags);
+        assertEquals(600, weighting.calcEdgeWeight(GHUtility.createMockedEdgeIteratorState(1000, edgeFlags), false), 0.1);
+        assertEquals(200, bikeWeighting.calcEdgeWeight(GHUtility.createMockedEdgeIteratorState(1000, edgeFlags), false), 0.1);
+    }
+
+    @Test
+    public void testPrivateTag() {
+        // allow private access
+        FlagEncoder carEncoder = new CarFlagEncoder(new PMap("block_private=false"));
+        FlagEncoder bikeEncoder = new BikeFlagEncoder(new PMap("block_private=false"));
+        EncodingManager em = new EncodingManager.Builder().add(carEncoder).add(bikeEncoder).build();
+
+        FastestWeighting weighting = new FastestWeighting(carEncoder);
+        FastestWeighting bikeWeighting = new FastestWeighting(bikeEncoder);
+
+        ReaderWay way = new ReaderWay(1);
+        way.setTag("highway", "secondary");
+
+        EncodingManager.AcceptWay acceptWay = new EncodingManager.AcceptWay();
+        assertTrue(em.acceptWay(way, acceptWay));
+        IntsRef edgeFlags = em.handleWayTags(way, acceptWay, em.createRelationFlags());
+
+        assertEquals(60, weighting.calcEdgeWeight(GHUtility.createMockedEdgeIteratorState(1000, edgeFlags), false), 0.1);
+        assertEquals(200, bikeWeighting.calcEdgeWeight(GHUtility.createMockedEdgeIteratorState(1000, edgeFlags), false), 0.1);
+
+        way.setTag("highway", "secondary");
+        way.setTag("access", "private");
+        acceptWay = new EncodingManager.AcceptWay();
+        assertTrue(em.acceptWay(way, acceptWay));
+        edgeFlags = em.handleWayTags(way, acceptWay, em.createRelationFlags());
+
+        assertEquals(600, weighting.calcEdgeWeight(GHUtility.createMockedEdgeIteratorState(1000, edgeFlags), false), 0.1);
+        // private should influence bike only slightly
+        assertEquals(240, bikeWeighting.calcEdgeWeight(GHUtility.createMockedEdgeIteratorState(1000, edgeFlags), false), 0.1);
     }
 
     @Test
@@ -273,7 +315,7 @@ public class CarFlagEncoderTest {
         EncodingManager.AcceptWay allowed = new EncodingManager.AcceptWay();
         for (FlagEncoder encoder : em.fetchEdgeEncoders())
             allowed.put(encoder.toString(), EncodingManager.Access.WAY);
-        long relFlags = 0;
+        IntsRef relFlags = em.createRelationFlags();
         IntsRef edgeFlags = em.handleWayTags(way, allowed, relFlags);
         assertEquals(140, avSpeedEnc.getDecimal(false, edgeFlags), 1e-1);
 
@@ -525,65 +567,13 @@ public class CarFlagEncoderTest {
         // still barrier!
         assertTrue(encoder.handleNodeTags(node) > 0);
 
-        encoder.setBlockByDefault(false);
+        CarFlagEncoder tmpEncoder = new CarFlagEncoder(new PMap("block_barriers=false"));
+        EncodingManager.create(tmpEncoder);
 
         // Test if cattle_grid is not blocking
         node = new ReaderNode(1, -1, -1);
         node.setTag("barrier", "cattle_grid");
-        assertTrue(encoder.handleNodeTags(node) == 0);
-    }
-
-    @Test
-    public void testTurnFlagEncoding_noCosts() {
-        FlagEncoder tmpEnc = new CarFlagEncoder(8, 5, 0);
-        EncodingManager em = EncodingManager.create(tmpEnc);
-
-        long flags_r0 = tmpEnc.getTurnFlags(true, 0);
-        long flags_0 = tmpEnc.getTurnFlags(false, 0);
-
-        long flags_r20 = tmpEnc.getTurnFlags(true, 0);
-        long flags_20 = tmpEnc.getTurnFlags(false, 20);
-
-        assertEquals(0, tmpEnc.getTurnCost(flags_r0), 1e-1);
-        assertEquals(0, tmpEnc.getTurnCost(flags_0), 1e-1);
-
-        assertEquals(0, tmpEnc.getTurnCost(flags_r20), 1e-1);
-        assertEquals(0, tmpEnc.getTurnCost(flags_20), 1e-1);
-
-        assertFalse(tmpEnc.isTurnRestricted(flags_r0));
-        assertFalse(tmpEnc.isTurnRestricted(flags_0));
-
-        assertFalse(tmpEnc.isTurnRestricted(flags_r20));
-        assertFalse(tmpEnc.isTurnRestricted(flags_20));
-    }
-
-    @Test
-    public void testTurnFlagEncoding_withCosts() {
-        FlagEncoder tmpEncoder = new CarFlagEncoder(8, 5, 127);
-        EncodingManager em = EncodingManager.create(tmpEncoder);
-
-        long flags_r0 = tmpEncoder.getTurnFlags(true, 0);
-        long flags_0 = tmpEncoder.getTurnFlags(false, 0);
-        assertTrue(Double.isInfinite(tmpEncoder.getTurnCost(flags_r0)));
-        assertEquals(0, tmpEncoder.getTurnCost(flags_0), 1e-1);
-        assertTrue(tmpEncoder.isTurnRestricted(flags_r0));
-        assertFalse(tmpEncoder.isTurnRestricted(flags_0));
-
-        long flags_r20 = tmpEncoder.getTurnFlags(true, 0);
-        long flags_20 = tmpEncoder.getTurnFlags(false, 20);
-        assertTrue(Double.isInfinite(tmpEncoder.getTurnCost(flags_r20)));
-        assertEquals(20, tmpEncoder.getTurnCost(flags_20), 1e-1);
-        assertTrue(tmpEncoder.isTurnRestricted(flags_r20));
-        assertFalse(tmpEncoder.isTurnRestricted(flags_20));
-
-        long flags_r220 = tmpEncoder.getTurnFlags(true, 0);
-        try {
-            tmpEncoder.getTurnFlags(false, 220);
-            assertTrue(false);
-        } catch (Exception ex) {
-        }
-        assertTrue(Double.isInfinite(tmpEncoder.getTurnCost(flags_r220)));
-        assertTrue(tmpEncoder.isTurnRestricted(flags_r220));
+        assertTrue(tmpEncoder.handleNodeTags(node) == 0);
     }
 
     @Test
@@ -635,7 +625,7 @@ public class CarFlagEncoderTest {
 
         EncodingManager.AcceptWay map = new EncodingManager.AcceptWay();
         assertTrue(em.acceptWay(way, map));
-        IntsRef edgeFlags = em.handleWayTags(way, map, 0);
+        IntsRef edgeFlags = em.handleWayTags(way, map, em.createRelationFlags());
         assertFalse(accessEnc.getBool(true, edgeFlags));
         assertFalse(accessEnc.getBool(false, edgeFlags));
         BooleanEncodedValue bikeAccessEnc = em.getEncoder("bike").getAccessEnc();

@@ -80,6 +80,8 @@ public class AlternativeRoute implements RoutingAlgorithm {
     private WeightApproximator weightApproximator;
 
     public AlternativeRoute(Graph graph, Weighting weighting, TraversalMode traversalMode) {
+        if (weighting.hasTurnCosts() && !traversalMode.isEdgeBased())
+            throw new IllegalStateException("Weightings supporting turn costs cannot be used with node-based traversal mode");
         this.graph = graph;
         this.weighting = weighting;
         this.traversalMode = traversalMode;
@@ -277,7 +279,7 @@ public class AlternativeRoute implements RoutingAlgorithm {
                 return true;
 
             // increase overlap of both searches:
-            return currFrom.weight + currTo.weight > explorationFactor * bestWeight;
+            return currFrom.weight + currTo.weight > explorationFactor * (bestWeight + stoppingCriterionOffset);
             // This is more precise but takes roughly 20% longer: return currFrom.weight > bestWeight && currTo.weight > bestWeight;
             // For bidir A* and AStarEdge.getWeightOfVisitedPath see comment in AStarBidirection.finished
         }
