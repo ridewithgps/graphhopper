@@ -119,8 +119,9 @@ $(document).ready(function (e) {
                 bounds.maxLat = tmp[3];
                 nominatim.setBounds(bounds);
                 var vehiclesDiv = $("#vehicles");
+                var weightingsDiv = $("#weightings");
 
-                function createButton(vehicle, hide) {
+                function createVehicleButton(vehicle, hide) {
                     var button = $("<button class='vehicle-btn' title='" + translate.tr(vehicle) + "'/>");
                     if (hide)
                         button.hide();
@@ -136,6 +137,18 @@ $(document).ready(function (e) {
                     return button;
                 }
 
+                function createWeightingButton(weighting) {
+                    var button = $("<button class='weighting-btn' title='" + translate.tr(weighting) + "'/>");
+                    button.attr('id', weighting);
+                    button.html("<img src='img/" + weighting + ".png' alt='" + translate.tr(weighting) + "'></img>");
+                    button.click(function () {
+                        ghRequest.initWeighting(weighting);
+                        resolveAll();
+                        routeLatLng(ghRequest);
+                    });
+                    return button;
+                }
+
                 if (json.features) {
                     ghRequest.features = json.features;
 
@@ -147,13 +160,23 @@ $(document).ready(function (e) {
                         ghRequest.initVehicle(vehicles[0]);
 
                     var hiddenVehicles = [];
+                    var allWeightings = new Set();
                     for (var i in vehicles) {
-                        var btn = createButton(vehicles[i].toLowerCase(), !showAllVehicles && i > 2);
+                        var btn = createVehicleButton(vehicles[i].toLowerCase(), !showAllVehicles && i > 2);
                         vehiclesDiv.append(btn);
 
                         if (i > 2)
                             hiddenVehicles.push(btn);
+
+                        var weightings = ghRequest.features[vehicles[i]].weightings;
+                        for (var i in weightings) {
+                            allWeightings.add(weightings[i]);
+                        }
                     }
+
+                    allWeightings.forEach(function (v, k, all) {
+                        weightingsDiv.append(createWeightingButton(v));
+                    });
 
                     if (!showAllVehicles && vehicles.length > 3) {
                         var moreBtn = $("<a id='more-vehicle-btn'> ...</a>").click(function () {
@@ -542,6 +565,9 @@ function routeLatLng(request, doQuery) {
 
     $("#vehicles button").removeClass("selectvehicle");
     $("button#" + request.getVehicle().toLowerCase()).addClass("selectvehicle");
+
+    $("#weightings button").removeClass("selectvehicle");
+    $("button#" + request.getWeighting().toLowerCase()).addClass("selectvehicle");
 
     var urlForAPI = request.createURL();
     routeResultsDiv.html('<img src="img/indicator.gif"/> Search Route ...');

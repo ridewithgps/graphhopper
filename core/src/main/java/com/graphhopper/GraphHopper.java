@@ -47,8 +47,10 @@ import com.graphhopper.routing.util.parsers.TagParserFactory;
 import com.graphhopper.routing.weighting.*;
 import com.graphhopper.storage.*;
 import com.graphhopper.storage.index.LocationIndex;
+import com.graphhopper.storage.index.PopularityIndex;
 import com.graphhopper.storage.index.LocationIndexTree;
 import com.graphhopper.storage.index.QueryResult;
+import com.graphhopper.storage.index.EdgeIndex;
 import com.graphhopper.util.*;
 import com.graphhopper.util.Parameters.CH;
 import com.graphhopper.util.Parameters.Landmark;
@@ -65,6 +67,10 @@ import java.io.File;
 import java.io.IOException;
 import java.text.DateFormat;
 import java.util.*;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.locks.Lock;
+import java.util.concurrent.locks.ReadWriteLock;
+import java.util.concurrent.locks.ReentrantReadWriteLock;
 
 import static com.graphhopper.routing.weighting.TurnCostProvider.NO_TURN_COST_PROVIDER;
 import static com.graphhopper.routing.weighting.Weighting.INFINITE_U_TURN_COSTS;
@@ -101,6 +107,8 @@ public class GraphHopper implements GraphHopperAPI {
     private final RoutingConfig routingConfig = new RoutingConfig();
     // for index
     private LocationIndex locationIndex;
+    private PopularityIndex popularityIndex;
+    private java.nio.file.Path popularityFile;
     private int preciseIndexResolution = 300;
     private int maxRegionSearch = 4;
     // for prepare
@@ -131,6 +139,7 @@ public class GraphHopper implements GraphHopperAPI {
         this.ghStorage = g;
         setFullyLoaded();
         initLocationIndex();
+        initPopularityIndex();
         return this;
     }
 
@@ -436,6 +445,13 @@ public class GraphHopper implements GraphHopperAPI {
         this.locationIndex = locationIndex;
     }
 
+    public PopularityIndex getPopularityIndex() {
+        if (popularityIndex == null)
+            throw new IllegalStateException("Popularity index not initialized");
+
+        return popularityIndex;
+    }
+
     /**
      * Sorts the graph which requires more RAM while import. See #12
      */
@@ -524,6 +540,16 @@ public class GraphHopper implements GraphHopperAPI {
             lockFactory = new SimpleFSLockFactory();
         else
             lockFactory = new NativeFSLockFactory();
+
+        // popularity
+        popularityFile = java.nio.file.Paths.get(ghConfig.getString("graph.popularity.file", ""));
+        if (!popularityFile.toFile().exists()) {
+            if (isEmpty(popularityFile.toString())) {
+                popularityFile = null;
+            } else {
+                throw new IllegalArgumentException("Popularity file \"" + popularityFile + "\" doesn't exist");
+            }
+        }
 
         // elevation
         this.smoothElevation = ghConfig.getBool("graph.elevation.smoothing", false);
@@ -714,6 +740,10 @@ public class GraphHopper implements GraphHopperAPI {
                 + "provide a DataReader or use e.g. GraphHopperOSM or a different subclass");
     }
 
+    public EdgeIndex getEdgeIndex() {
+        throw new UnsupportedOperationException("Use GraphHopperOSM, not this class directly.");
+    }
+
     protected DataReader initDataReader(DataReader reader) {
         if (dataReaderFile == null)
             throw new IllegalArgumentException("No file for DataReader specified");
@@ -757,6 +787,7 @@ public class GraphHopper implements GraphHopperAPI {
         }
 
         setGraphHopperLocation(graphHopperFolder);
+
 
         if (encodingManager == null)
             setEncodingManager(EncodingManager.create(encodedValueFactory, flagEncoderFactory, ghLocation));
@@ -907,14 +938,14 @@ public class GraphHopper implements GraphHopperAPI {
     }
 
     /**
-     * Does the preparation and creates the location index
+     * Does the preparation and creates the location and popularity indexes
      */
     public final void postProcessing() {
         postProcessing(false);
     }
 
     /**
-     * Does the preparation and creates the location index
+     * Does the preparation and creates the location and popularity indexes
      *
      * @param closeEarly release resources as early as possible
      */
@@ -938,10 +969,13 @@ public class GraphHopper implements GraphHopperAPI {
 
         initLocationIndex();
 
+        initPopularityIndex();
+
         importPublicTransit();
 
         if (lmPreparationHandler.isEnabled())
             lmPreparationHandler.createPreparations(ghStorage, locationIndex);
+
         loadOrPrepareLM(closeEarly);
 
         if (chPreparationHandler.isEnabled())
@@ -989,7 +1023,7 @@ public class GraphHopper implements GraphHopperAPI {
      *                         LM preparation or Isochrones
      */
     public Weighting createWeighting(ProfileConfig profileConfig, PMap hints, boolean disableTurnCosts) {
-        return new DefaultWeightingFactory(encodingManager, ghStorage).createWeighting(profileConfig, hints, disableTurnCosts);
+        return new DefaultWeightingFactory(encodingManager, ghStorage, this).createWeighting(profileConfig, hints, disableTurnCosts);
     }
 
     @Override
@@ -1205,6 +1239,27 @@ public class GraphHopper implements GraphHopperAPI {
         locationIndex = createLocationIndex(ghStorage.getDirectory());
     }
 
+    protected PopularityIndex createPopularityIndex(Directory dir) {
+        PopularityIndex tmpIndex = new PopularityIndex(ghStorage, dir, popularityFile, getEdgeIndex());
+        try {
+            if (!tmpIndex.loadExisting()) {
+                ensureWriteAccess();
+                tmpIndex.prepareIndex();
+            }
+        } catch (IOException e) {
+            throw new RuntimeException("Error reading from popularity file " + popularityFile , e);
+        }
+
+        return tmpIndex;
+    }
+
+    protected void initPopularityIndex() {
+        if (popularityIndex != null)
+            throw new IllegalStateException("Cannot initialize popularityIndex twice!");
+
+        popularityIndex = createPopularityIndex(ghStorage.getDirectory());
+    }
+
     private boolean isCHPrepared() {
         return "true".equals(ghStorage.getProperties().get(CH.PREPARE + "done"))
                 // remove old property in >0.9
@@ -1223,6 +1278,8 @@ public class GraphHopper implements GraphHopperAPI {
             if (closeEarly) {
                 locationIndex.flush();
                 locationIndex.close();
+                popularityIndex.flush();
+                popularityIndex.close();
                 ghStorage.flushAndCloseEarly();
             }
 
@@ -1280,6 +1337,9 @@ public class GraphHopper implements GraphHopperAPI {
         if (locationIndex != null)
             locationIndex.close();
 
+        if (popularityIndex != null)
+            popularityIndex.close();
+
         try {
             lockFactory.forceRemove(fileLockName, true);
         } catch (Exception ex) {
@@ -1320,10 +1380,12 @@ public class GraphHopper implements GraphHopperAPI {
     private static class DefaultWeightingFactory {
         private final EncodingManager encodingManager;
         private final GraphHopperStorage ghStorage;
+        private final GraphHopper hopper;
 
-        public DefaultWeightingFactory(EncodingManager encodingManager, GraphHopperStorage ghStorage) {
+        public DefaultWeightingFactory(EncodingManager encodingManager, GraphHopperStorage ghStorage, GraphHopper hopper) {
             this.encodingManager = encodingManager;
             this.ghStorage = ghStorage;
+            this.hopper = hopper;
         }
 
         public Weighting createWeighting(ProfileConfig profile, PMap requestHints, boolean disableTurnCosts) {
@@ -1362,7 +1424,11 @@ public class GraphHopper implements GraphHopperAPI {
                     weighting = new FastestWeighting(encoder, hints, turnCostProvider);
             } else if ("rwgps".equalsIgnoreCase(weightingStr)) {
                 if (encoder.supports(RWGPSWeighting.class)) {
-                    weighting = new RWGPSWeighting(encoder, hints);
+                    weighting = new RWGPSWeighting(encoder, hints, hopper);
+                }
+            } else if ("rwgpswithoutpopularity".equalsIgnoreCase(weightingStr)) {
+                if (encoder.supports(RWGPSWithoutPopularityWeighting.class)) {
+                    weighting = new RWGPSWithoutPopularityWeighting(encoder, hints);
                 }
             } else if ("curvature".equalsIgnoreCase(weightingStr)) {
                 if (encoder.supports(CurvatureWeighting.class))

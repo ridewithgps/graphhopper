@@ -22,6 +22,7 @@ import com.graphhopper.routing.profiles.*;
 import com.graphhopper.routing.util.spatialrules.TransportationMode;
 import com.graphhopper.routing.weighting.PriorityWeighting;
 import com.graphhopper.routing.weighting.RWGPSWeighting;
+import com.graphhopper.routing.weighting.RWGPSWithoutPopularityWeighting;
 import com.graphhopper.storage.IntsRef;
 import com.graphhopper.util.PMap;
 
@@ -309,7 +310,9 @@ public class FootFlagEncoder extends AbstractFlagEncoder {
         if (super.supports(feature))
             return true;
 
-        return PriorityWeighting.class.isAssignableFrom(feature) && feature != RWGPSWeighting.class;
+        return PriorityWeighting.class.isAssignableFrom(feature)
+            && feature != RWGPSWeighting.class
+            && feature != RWGPSWithoutPopularityWeighting.class;
     }
 
     /*

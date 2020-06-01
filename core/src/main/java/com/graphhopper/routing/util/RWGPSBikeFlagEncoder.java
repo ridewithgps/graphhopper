@@ -7,6 +7,7 @@ import com.graphhopper.routing.profiles.RouteNetwork;
 import com.graphhopper.routing.profiles.UnsignedDecimalEncodedValue;
 import com.graphhopper.routing.util.EncodingManager;
 import com.graphhopper.routing.weighting.RWGPSWeighting;
+import com.graphhopper.routing.weighting.RWGPSWithoutPopularityWeighting;
 import com.graphhopper.storage.IntsRef;
 import com.graphhopper.util.Helper;
 import com.graphhopper.util.PMap;
@@ -188,7 +189,7 @@ public class RWGPSBikeFlagEncoder extends BikeFlagEncoder {
         if (super.supports(feature))
             return true;
 
-        return RWGPSWeighting.class.isAssignableFrom(feature);
+        return RWGPSWeighting.class.isAssignableFrom(feature) || RWGPSWithoutPopularityWeighting.class.isAssignableFrom(feature);
     }
 
     @Override
