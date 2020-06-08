@@ -44,8 +44,8 @@ public class PopularityIndex implements Storable<PopularityIndex> {
     public PopularityIndex prepareIndex() throws IOException {
         // edges * 4 because edge IDs are each `int`s
         // and then * 4 again because we store an `int` score for each
-        final int indexSize = this.graph.getEdges() * 4 * 4;
-        index.setSegmentSize(indexSize);
+        final long edges = this.graph.getEdges();
+        final long indexSize = edges * 4 * 4;
         index.create(indexSize);
         if (this.popularityFile != null) {
             loadData();
