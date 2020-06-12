@@ -46,6 +46,7 @@ public class PopularityIndex implements Storable<PopularityIndex> {
         // and then * 4 again because we store an `int` score for each
         final long edges = this.graph.getEdges();
         final long indexSize = edges * 4 * 4;
+        logger.info("Creating array of size {}", indexSize);
         index.create(indexSize);
         if (this.popularityFile != null) {
             loadData();
@@ -57,14 +58,14 @@ public class PopularityIndex implements Storable<PopularityIndex> {
     }
 
     void loadData() throws IOException {
-        final StopWatch sw = new StopWatch().start();
+        StopWatch sw = new StopWatch().start();
         final EdgeInfo ei = new EdgeInfo(this.popularityFile);
         final float elapsed_ei_load = sw.stop().getSeconds();
         logger.info(String.format(Locale.ROOT,
                                   "Loading EdgeInfo with %s OSM Ways finished in %s seconds.",
                                   Helper.nf(ei.size()),
                                   elapsed_ei_load));
-        sw.start();
+        sw = new StopWatch().start();
         EdgeIterator iter =  this.graph.getAllEdges();
         long edgesTouched = 0;
         while (iter.next()) {
@@ -96,9 +97,10 @@ public class PopularityIndex implements Storable<PopularityIndex> {
 
     public int getPopularity(EdgeIteratorState edge) {
         long edgeId = edge.getEdge();
+        int raw = getRawPopularity(edgeId);
 
         // add 1 so that we never return 0 popularity
-        return getRawPopularity(edgeId) + 1;
+        return raw + 1;
     }
 
 
@@ -167,6 +169,7 @@ public class PopularityIndex implements Storable<PopularityIndex> {
 
         public EdgeInfo(Path input) throws IOException {
             try (InputStream in = new GZIPInputStream(new FileInputStream(input.toFile()))) {
+                logger.info("Loading {}", input);
                 final ObjectMapper mapper = new ObjectMapper();
                 final JsonNode root = mapper.readTree(in);
 
