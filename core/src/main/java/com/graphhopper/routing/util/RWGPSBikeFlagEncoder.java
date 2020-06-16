@@ -52,24 +52,24 @@ public class RWGPSBikeFlagEncoder extends BikeFlagEncoder {
     }
 
     double calcCost(ReaderWay way, boolean partOfCycleRelation) {
-        double cost = 0.6;
+        double cost = 0.8;
 
         if (isBikePath(way)) {
-            cost = 0.40;
+            cost = 0.6;
         } else if (isBikeLane(way)) {
-            cost = 0.45;
+            cost = 0.7;
         } else if (isSharedBikeLane(way)) {
-            cost = 0.50;
+            cost = 0.75;
         } else if (way.hasTag("highway", "track")) {
             if (way.hasTag("tracktype", "grade1")) {
-                cost = 0.50;
+                cost = 0.6;
             } else if (way.hasTag("tracktype", "grade2")) {
-                cost = 0.525;
+                cost = 0.7;
             } else if (way.hasTag("tracktype", "grade3")) {
-                cost = 0.70;
+                cost = 0.8;
             } else {
                 // this includes grades 4, 5, and no value for tracktype
-                cost = 2.0;
+                cost = 1.0;
             }
         } else if (way.hasTag("highway", "motorway", "trunk")) {
             cost = 2.5;
@@ -89,15 +89,15 @@ public class RWGPSBikeFlagEncoder extends BikeFlagEncoder {
             double mtbFactor = 1;
 
             if (mtbScale.equals("0-")) {
-                mtbFactor = 1.1;
+                mtbFactor = 1.5;
             } else if (mtbScale.equals("0")) {
-                mtbFactor = 1.75;
+                mtbFactor = 2;
             } else if (mtbScale.equals("0+")) {
                 // same penalty as RLIS:bicycle=caution_area
-                mtbFactor = 2;
+                mtbFactor = 2.5;
             } else {
                 // large penalty to all other types
-                mtbFactor = 10;
+                mtbFactor = 2.5;
             }
 
             cost *= mtbFactor;
@@ -106,7 +106,7 @@ public class RWGPSBikeFlagEncoder extends BikeFlagEncoder {
         // penalize bike caution_area
         if (way.hasTag("RLIS:bicycle", "caution_area")) {
             // same penalty as mtb:scale=0+
-            cost *= 2;
+            cost *= 1.25;
         }
 
         // only increase cost from road features if we're riding on the road
