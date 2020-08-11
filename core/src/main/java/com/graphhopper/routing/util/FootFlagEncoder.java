@@ -103,9 +103,9 @@ public class FootFlagEncoder extends AbstractFlagEncoder {
         sidewalkValues.add("right");
 
         blockBarriersByDefault(false);
-        absoluteBarriers.add("fence");
-        potentialBarriers.add("gate");
-        potentialBarriers.add("cattle_grid");
+        //absoluteBarriers.add("fence");
+        //potentialBarriers.add("gate");
+        //potentialBarriers.add("cattle_grid");
 
         safeHighwayTags.add("footway");
         safeHighwayTags.add("path");
@@ -134,7 +134,7 @@ public class FootFlagEncoder extends AbstractFlagEncoder {
         allowedHighwayTags.add("unclassified");
         allowedHighwayTags.add("road");
         // disallowed in some countries
-        //allowedHighwayTags.add("bridleway");
+        allowedHighwayTags.add("bridleway");
 
         routeMap.put(INTERNATIONAL, UNCHANGED.getValue());
         routeMap.put(NATIONAL, UNCHANGED.getValue());
@@ -222,8 +222,8 @@ public class FootFlagEncoder extends AbstractFlagEncoder {
             return EncodingManager.Access.CAN_SKIP;
 
         // do not get our feet wet, "yes" is already included above
-        if (isBlockFords() && (way.hasTag("highway", "ford") || way.hasTag("ford")))
-            return EncodingManager.Access.CAN_SKIP;
+        //if (isBlockFords() && (way.hasTag("highway", "ford") || way.hasTag("ford")))
+        //    return EncodingManager.Access.CAN_SKIP;
 
         if (getConditionalTagInspector().isPermittedWayConditionallyRestricted(way))
             return EncodingManager.Access.CAN_SKIP;

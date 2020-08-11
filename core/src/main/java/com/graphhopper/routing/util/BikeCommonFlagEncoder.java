@@ -80,13 +80,13 @@ abstract public class BikeCommonFlagEncoder extends AbstractFlagEncoder {
         oppositeLanes.add("opposite_track");
 
         blockBarriersByDefault(false);
-        potentialBarriers.add("gate");
+        //potentialBarriers.add("gate");
         // potentialBarriers.add("lift_gate");
-        potentialBarriers.add("swing_gate");
-        potentialBarriers.add("cattle_grid");
+        //potentialBarriers.add("swing_gate");
+        //potentialBarriers.add("cattle_grid");
 
-        absoluteBarriers.add("fence");
-        absoluteBarriers.add("stile");
+        //absoluteBarriers.add("fence");
+        //absoluteBarriers.add("stile");
         absoluteBarriers.add("turnstile");
 
         unpavedSurfaceTags.add("unpaved");
@@ -123,10 +123,10 @@ abstract public class BikeCommonFlagEncoder extends AbstractFlagEncoder {
         setSurfaceSpeed("paving_stones", 12);
         setSurfaceSpeed("paving_stones:30", 12);
         setSurfaceSpeed("unpaved", 14);
-        setSurfaceSpeed("compacted", 16);
+        setSurfaceSpeed("compacted", 14);
         setSurfaceSpeed("dirt", 10);
         setSurfaceSpeed("earth", 12);
-        setSurfaceSpeed("fine_gravel", 18);
+        setSurfaceSpeed("fine_gravel", 14);
         setSurfaceSpeed("grass", 8);
         setSurfaceSpeed("grass_paver", 8);
         setSurfaceSpeed("gravel", 12);
@@ -134,7 +134,7 @@ abstract public class BikeCommonFlagEncoder extends AbstractFlagEncoder {
         setSurfaceSpeed("ice", PUSHING_SECTION_SPEED / 2);
         setSurfaceSpeed("metal", 10);
         setSurfaceSpeed("mud", 10);
-        setSurfaceSpeed("pebblestone", 16);
+        setSurfaceSpeed("pebblestone", 14);
         setSurfaceSpeed("salt", 6);
         setSurfaceSpeed("sand", 6);
         setSurfaceSpeed("wood", 6);
@@ -145,7 +145,7 @@ abstract public class BikeCommonFlagEncoder extends AbstractFlagEncoder {
 
         final int CYCLEWAY_SPEED = 18;  // Make sure cycleway and path use same speed value, see #634
         setHighwaySpeed("cycleway", CYCLEWAY_SPEED);
-        setHighwaySpeed("path", 10);
+        setHighwaySpeed("path", CYCLEWAY_SPEED);
         setHighwaySpeed("footway", 6);
         setHighwaySpeed("platform", 6);
         setHighwaySpeed("pedestrian", 6);
@@ -230,17 +230,21 @@ abstract public class BikeCommonFlagEncoder extends AbstractFlagEncoder {
             return EncodingManager.Access.CAN_SKIP;
         }
 
-        if (!highwaySpeeds.containsKey(highwayValue))
-            return EncodingManager.Access.CAN_SKIP;
-
-        String sacScale = way.getTag("sac_scale");
-        if (sacScale != null) {
-            if ((way.hasTag("highway", "cycleway"))
-                    && (way.hasTag("sac_scale", "hiking")))
+        if ("bridleway".equals(highwayValue)) {
+            if (way.hasTag("bicycle", intendedValues))
                 return EncodingManager.Access.WAY;
-            if (!isSacScaleAllowed(sacScale))
+	    else
                 return EncodingManager.Access.CAN_SKIP;
         }
+
+        //String sacScale = way.getTag("sac_scale");
+        //if (sacScale != null) {
+        //    if ((way.hasTag("highway", "cycleway"))
+        //            && (way.hasTag("sac_scale", "hiking")))
+        //        return EncodingManager.Access.WAY;
+        //    if (!isSacScaleAllowed(sacScale))
+        //        return EncodingManager.Access.CAN_SKIP;
+        //}
 
         // use the way if it is tagged for bikes
         if (way.hasTag("bicycle", intendedValues) ||
@@ -256,8 +260,8 @@ abstract public class BikeCommonFlagEncoder extends AbstractFlagEncoder {
             return EncodingManager.Access.CAN_SKIP;
 
         // do not use fords with normal bikes, flagged fords are in included above
-        if (isBlockFords() && (way.hasTag("highway", "ford") || way.hasTag("ford")))
-            return EncodingManager.Access.CAN_SKIP;
+        //if (isBlockFords() && (way.hasTag("highway", "ford") || way.hasTag("ford")))
+        //    return EncodingManager.Access.CAN_SKIP;
 
         // check access restrictions
         if (way.hasTag(restrictions, restrictedValues) && !getConditionalTagInspector().isRestrictedWayConditionallyPermitted(way))
