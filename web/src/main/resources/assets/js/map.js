@@ -142,6 +142,9 @@ function initMap(bounds, setStartCoord, setIntermediateCoord, setEndCoord, selec
     else
         L.control.layers(tileLayers.getAvailableTileLayers()).addTo(map);
 
+    map.on({'overlayadd': tileLayers.overlayChange,
+            'overlayremove': tileLayers.overlayChange});
+
     map.on('baselayerchange', function (a) {
         if (a.name) {
             tileLayers.activeLayerName = a.name;
