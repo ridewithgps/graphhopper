@@ -17,9 +17,9 @@
  */
 package com.graphhopper.http.resources;
 
+import com.graphhopper.config.ProfileConfig;
 import com.graphhopper.http.GraphHopperApplication;
-import com.graphhopper.http.GraphHopperServerConfiguration;
-import com.graphhopper.util.CmdArgs;
+import com.graphhopper.http.util.GraphHopperServerTestConfiguration;
 import com.graphhopper.util.Helper;
 import com.wdtinc.mapbox_vector_tile.adapt.jts.MvtReader;
 import com.wdtinc.mapbox_vector_tile.adapt.jts.TagKeyValueMapConverter;
@@ -38,9 +38,11 @@ import javax.ws.rs.core.Response;
 import java.io.File;
 import java.io.IOException;
 import java.io.InputStream;
+import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 
+import static com.graphhopper.http.util.TestUtils.clientTarget;
 import static junit.framework.TestCase.assertTrue;
 import static org.junit.Assert.assertEquals;
 
@@ -50,21 +52,21 @@ import static org.junit.Assert.assertEquals;
 public class MvtResourceTest {
     private static final String DIR = "./target/andorra-gh/";
 
-    private static final GraphHopperServerConfiguration config = new GraphHopperServerConfiguration();
+    private static final GraphHopperServerTestConfiguration config = new GraphHopperServerTestConfiguration();
 
     static {
-        config.getGraphHopperConfiguration().merge(new CmdArgs().
-                put("graph.flag_encoders", "car").
-                put("graph.encoded_values", "road_class,road_environment,max_speed,surface").
-                put("prepare.ch.weightings", "no").
-                put("prepare.min_network_size", "0").
-                put("prepare.min_one_way_network_size", "0").
-                put("datareader.file", "../core/files/andorra.osm.pbf").
-                put("graph.location", DIR));
+        config.getGraphHopperConfiguration().
+                putObject("graph.flag_encoders", "car").
+                putObject("graph.encoded_values", "road_class,road_environment,max_speed,surface").
+                putObject("prepare.min_network_size", 0).
+                putObject("prepare.min_one_way_network_size", 0).
+                putObject("datareader.file", "../core/files/andorra.osm.pbf").
+                putObject("graph.location", DIR).
+                setProfiles(Collections.singletonList(new ProfileConfig("car").setVehicle("car").setWeighting("fastest")));
     }
 
     @ClassRule
-    public static final DropwizardAppRule<GraphHopperServerConfiguration> app = new DropwizardAppRule<>(GraphHopperApplication.class, config);
+    public static final DropwizardAppRule<GraphHopperServerTestConfiguration> app = new DropwizardAppRule(GraphHopperApplication.class, config);
 
     @BeforeClass
     @AfterClass
@@ -74,7 +76,7 @@ public class MvtResourceTest {
 
     @Test
     public void testBasicMvtQuery() throws IOException {
-        final Response response = app.client().target("http://localhost:8080/mvt/15/16528/12099.mvt").request().buildGet().invoke();
+        final Response response = clientTarget(app, "/mvt/15/16528/12099.mvt").request().buildGet().invoke();
         assertEquals(200, response.getStatus());
         InputStream is = response.readEntity(InputStream.class);
         JtsMvt result = MvtReader.loadMvt(is, new GeometryFactory(), new TagKeyValueMapConverter());
@@ -90,7 +92,7 @@ public class MvtResourceTest {
 
     @Test
     public void testWithDetailsInResponse() throws IOException {
-        final Response response = app.client().target("http://localhost:8080/mvt/15/16522/12102.mvt?details=max_speed&details=road_class&details=road_environment").request().buildGet().invoke();
+        final Response response = clientTarget(app, "/mvt/15/16522/12102.mvt?details=max_speed&details=road_class&details=road_environment").request().buildGet().invoke();
         assertEquals(200, response.getStatus());
         InputStream is = response.readEntity(InputStream.class);
         JtsMvt result = MvtReader.loadMvt(is, new GeometryFactory(), new TagKeyValueMapConverter());
@@ -98,7 +100,7 @@ public class MvtResourceTest {
         JtsLayer layer = layerValues.values().iterator().next();
         List layerGeoList = (List) layer.getGeometries();
         Geometry geometry = (Geometry) layerGeoList.get(0);
-        assertEquals(19, geometry.getCoordinates().length);
+        assertEquals(18, geometry.getCoordinates().length);
         assertEquals(21, layerGeoList.size());
 
         Map map = (Map) ((Geometry) layerGeoList.get(0)).getUserData();

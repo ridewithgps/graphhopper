@@ -13,6 +13,7 @@ bin/
 *.map
 android/libs/graphhopper-*-android.jar
 */nbactions.xml
+.idea
 .idea/
 *iml
 debug.sh
@@ -39,3 +40,5 @@ local.properties
 .DS_Store
 /graph-cache
 package-lock.json
+*.swp
+popularity.json.gz

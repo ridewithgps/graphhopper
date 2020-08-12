@@ -1,11 +1,15 @@
 package com.graphhopper.resources;
 
 import com.graphhopper.GraphHopper;
+import com.graphhopper.storage.CHProfile;
+import com.graphhopper.routing.weighting.Weighting;
 import com.graphhopper.routing.profiles.*;
 import com.graphhopper.routing.util.DefaultEdgeFilter;
 import com.graphhopper.routing.util.EncodingManager;
+import com.graphhopper.routing.util.FlagEncoder;
 import com.graphhopper.storage.NodeAccess;
 import com.graphhopper.storage.index.LocationIndexTree;
+import com.graphhopper.storage.index.PopularityIndex;
 import com.graphhopper.util.*;
 import com.graphhopper.util.shapes.BBox;
 import com.wdtinc.mapbox_vector_tile.VectorTile;
@@ -71,6 +75,7 @@ public class MVTResource {
         Coordinate nw = num2deg(xInfo, yInfo, zInfo);
         Coordinate se = num2deg(xInfo + 1, yInfo + 1, zInfo);
         LocationIndexTree locationIndex = (LocationIndexTree) graphHopper.getLocationIndex();
+        PopularityIndex popularityIndex = graphHopper.getPopularityIndex();
         final NodeAccess na = graphHopper.getGraphHopperStorage().getNodeAccess();
         EdgeExplorer edgeExplorer = graphHopper.getGraphHopperStorage().createEdgeExplorer(DefaultEdgeFilter.ALL_EDGES);
         BBox bbox = new BBox(nw.x, se.x, se.y, nw.y);
@@ -99,7 +104,7 @@ public class MVTResource {
                 LineString lineString;
                 RoadClass rc = edge.get(roadClassEnc);
                 if (zInfo >= 14) {
-                    PointList pl = edge.fetchWayGeometry(3);
+                    PointList pl = edge.fetchWayGeometry(FetchMode.ALL);
                     lineString = pl.toLineString(false);
                 } else if (rc == RoadClass.MOTORWAY
                         || zInfo > 10 && (rc == RoadClass.PRIMARY || rc == RoadClass.TRUNK)
@@ -118,6 +123,7 @@ public class MVTResource {
                 edgeCounter.incrementAndGet();
                 Map<String, Object> map = new HashMap<>(2);
                 map.put("name", edge.getName());
+                map.put("popularity", popularityIndex.getPopularity(edge));
                 for (String str : pathDetails) {
                     // how to indicate an erroneous parameter?
                     if (str.contains(",") || !encodingManager.hasEncodedValue(str))
@@ -132,6 +138,15 @@ public class MVTResource {
                         map.put(ev.getName(), edge.get((BooleanEncodedValue) ev));
                     else if (ev instanceof IntEncodedValue)
                         map.put(ev.getName(), edge.get((IntEncodedValue) ev));
+                }
+
+                for (FlagEncoder encoder: encodingManager.fetchEdgeEncoders()) {
+                    for (CHProfile profile: graphHopper.getGraphHopperStorage().getCHProfiles()) {
+                        final Weighting weighting = profile.getWeighting();
+                        if (weighting.getFlagEncoder().equals(encoder)) {
+                            map.put("WEIGHT " + encoder.toString() + "|" +  weighting.getName(), weighting.calcEdgeWeight(edge, false));
+                        }
+                    }
                 }
 
                 lineString.setUserData(map);

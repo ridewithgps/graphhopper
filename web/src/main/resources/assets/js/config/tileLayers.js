@@ -96,8 +96,22 @@ var availableTileLayers = {
     "OpenStreetMap.de": osmde
 };
 
+function perc2color(perc) {
+    var r, g, b = 0;
+    if(perc < 50) {
+        r = 255;
+        g = Math.round(5.1 * perc);
+    }
+    else {
+        g = 255;
+        r = Math.round(510 - 5.10 * perc);
+    }
+    var h = r * 0x10000 + g * 0x100 + b * 0x1;
+    return '#' + ('000000' + h.toString(16)).slice(-6);
+}
+
 var overlays;
-if(ghenv.environment === 'development') {
+module.exports.enableVectorTiles = function () {
     var omniscaleGray = L.tileLayer('https://maps.omniscale.net/v2/' +osAPIKey + '/style.grayscale/layers.world,buildings,landusages,labels/{z}/{x}/{y}.png?' + (retinaTiles ? '&hq=true' : ''), {
         layers: 'osm',
         attribution: osmAttr + ', &copy; <a href="https://maps.omniscale.com/">Omniscale</a>'
@@ -129,12 +143,33 @@ if(ghenv.environment === 'development') {
             } else if(rc == "secondary") {
                 weight = 2;
             }
+
             if(zoom > 16)
                weight += 3;
             else if(zoom > 15)
                weight += 2;
             else if(zoom > 13)
-               weight += 1;
+                weight += 1;
+
+            f = 50;
+            popularity -= f;
+            if (popularity == 1 - f) {
+                color = "black";
+            } else if (popularity <= 0) {
+                color = "grey";
+            } else if (popularity < 100) {
+                color = perc2color(popularity);
+            } else {
+                color = "purple";
+            }
+
+            // if (popularity == 1) {
+            //     color = "grey";
+            // } else if (popularity <= 5) {
+            //     color = "yellow";
+            // } else {
+            //     color = "orange";
+            // }
 
             return {
                 weight: weight,

@@ -30,10 +30,16 @@ if (!host) {
 }
 
 var AutoComplete = require('./autocomplete.js');
-if (ghenv.environment === 'development')
+if (ghenv.environment === 'development') {
     var autocomplete = AutoComplete.prototype.createStub();
-else
+} else {
     var autocomplete = new AutoComplete(ghenv.geocoding.host, ghenv.geocoding.api_key);
+    // overwrite default for production
+    GHRequest.prototype.hasTCSupport = function() {
+       if(this.api_params.turn_costs !== false)
+          this.api_params.turn_costs = new Set(["car", "truck", "small_truck", "scooter"]).has(this.api_params.vehicle);
+    };
+}
 
 var mapLayer = require('./map.js');
 var nominatim = require('./nominatim.js');
@@ -46,11 +52,12 @@ var format = require('./tools/format.js');
 var urlTools = require('./tools/url.js');
 var vehicleTools = require('./tools/vehicle.js');
 var tileLayers = require('./config/tileLayers.js');
+if(ghenv.with_tiles)
+   tileLayers.enableVectorTiles();
 
 var debug = false;
 var ghRequest = new GHRequest(host, ghenv.routing.api_key);
 var bounds = {};
-
 var metaVersionInfo;
 
 // usage: log('inside coolFunc',this,arguments);
@@ -112,8 +119,9 @@ $(document).ready(function (e) {
                 bounds.maxLat = tmp[3];
                 nominatim.setBounds(bounds);
                 var vehiclesDiv = $("#vehicles");
+                var weightingsDiv = $("#weightings");
 
-                function createButton(vehicle, hide) {
+                function createVehicleButton(vehicle, hide) {
                     var button = $("<button class='vehicle-btn' title='" + translate.tr(vehicle) + "'/>");
                     if (hide)
                         button.hide();
@@ -122,6 +130,19 @@ $(document).ready(function (e) {
                     button.html("<img src='img/" + vehicle + ".png' alt='" + translate.tr(vehicle) + "'></img>");
                     button.click(function () {
                         ghRequest.initVehicle(vehicle);
+                        resolveAll();
+                        if (ghRequest.route.isResolved())
+                          routeLatLng(ghRequest);
+                    });
+                    return button;
+                }
+
+                function createWeightingButton(weighting) {
+                    var button = $("<button class='weighting-btn' title='" + translate.tr(weighting) + "'/>");
+                    button.attr('id', weighting);
+                    button.html("<img src='img/" + weighting + ".png' alt='" + translate.tr(weighting) + "'></img>");
+                    button.click(function () {
+                        ghRequest.initWeighting(weighting);
                         resolveAll();
                         routeLatLng(ghRequest);
                     });
@@ -138,17 +159,24 @@ $(document).ready(function (e) {
                     if (vehicles.length > 0)
                         ghRequest.initVehicle(vehicles[0]);
 
-                    if (ghRequest.isPublicTransit())
-                        $(".time_input").show();
-
                     var hiddenVehicles = [];
+                    var allWeightings = new Set();
                     for (var i in vehicles) {
-                        var btn = createButton(vehicles[i].toLowerCase(), !showAllVehicles && i > 2);
+                        var btn = createVehicleButton(vehicles[i].toLowerCase(), !showAllVehicles && i > 2);
                         vehiclesDiv.append(btn);
 
                         if (i > 2)
                             hiddenVehicles.push(btn);
+
+                        var weightings = ghRequest.features[vehicles[i]].weightings;
+                        for (var i in weightings) {
+                            allWeightings.add(weightings[i]);
+                        }
                     }
+
+                    allWeightings.forEach(function (v, k, all) {
+                        weightingsDiv.append(createWeightingButton(v));
+                    });
 
                     if (!showAllVehicles && vehicles.length > 3) {
                         var moreBtn = $("<a id='more-vehicle-btn'> ...</a>").click(function () {
@@ -157,7 +185,7 @@ $(document).ready(function (e) {
                                 hiddenVehicles[i].show();
                             }
                         });
-                        vehiclesDiv.append($("<a class='vehicle-info-link' href='https://graphhopper.com/api/1/docs/supported-vehicle-profiles/'>?</a>"));
+                        vehiclesDiv.append($("<a class='vehicle-info-link' href='https://docs.graphhopper.com/#section/Map-Data-and-Routing-Profiles/OpenStreetMap'>?</a>"));
                         vehiclesDiv.append(moreBtn);
                     }
                 }
@@ -245,7 +273,10 @@ function initFromParams(params, doQuery) {
         time_24hr: true,
         enableTime: true
     });
-
+    if (ghRequest.isPublicTransit())
+        $(".time_input").show();
+    else
+        $(".time_input").hide();
     if (ghRequest.getEarliestDepartureTime()) {
         flatpickr.setDate(ghRequest.getEarliestDepartureTime());
     }
@@ -386,6 +417,7 @@ function setIntermediateCoord(e) {
     });
     var index = routeManipulation.getIntermediatePointIndex(routeSegments, e.latlng);
     ghRequest.route.add(e.latlng.wrap(), index);
+    ghRequest.do_zoom = false;
     resolveIndex(index);
     routeIfAllResolved();
 }
@@ -461,6 +493,8 @@ function resolveTo() {
 }
 
 function resolveIndex(index) {
+    if(!ghRequest.route.getIndex(index))
+        return;
     setFlag(ghRequest.route.getIndex(index), index);
     if (index === 0) {
         if (!ghRequest.to.isResolved())
@@ -532,6 +566,9 @@ function routeLatLng(request, doQuery) {
     $("#vehicles button").removeClass("selectvehicle");
     $("button#" + request.getVehicle().toLowerCase()).addClass("selectvehicle");
 
+    $("#weightings button").removeClass("selectvehicle");
+    $("button#" + request.getWeighting().toLowerCase()).addClass("selectvehicle");
+
     var urlForAPI = request.createURL();
     routeResultsDiv.html('<img src="img/indicator.gif"/> Search Route ...');
     request.doRequest(urlForAPI, function (json) {
@@ -598,7 +635,8 @@ function routeLatLng(request, doQuery) {
                 mapLayer.updateScale(useMiles);
                 ghRequest.useMiles = useMiles;
                 resolveAll();
-                routeLatLng(ghRequest);
+                if (ghRequest.route.isResolved())
+                  routeLatLng(ghRequest);
             };
         };
 

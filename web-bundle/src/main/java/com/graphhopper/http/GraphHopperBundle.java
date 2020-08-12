@@ -20,6 +20,7 @@ package com.graphhopper.http;
 
 import com.fasterxml.jackson.core.JsonGenerator;
 import com.fasterxml.jackson.databind.BeanDescription;
+import com.fasterxml.jackson.databind.MapperFeature;
 import com.fasterxml.jackson.databind.SerializationConfig;
 import com.fasterxml.jackson.databind.SerializerProvider;
 import com.fasterxml.jackson.databind.module.SimpleModule;
@@ -29,33 +30,25 @@ import com.fasterxml.jackson.databind.util.StdDateFormat;
 import com.fasterxml.jackson.datatype.jdk8.Jdk8Module;
 import com.graphhopper.GraphHopper;
 import com.graphhopper.GraphHopperAPI;
+import com.graphhopper.GraphHopperConfig;
 import com.graphhopper.http.health.GraphHopperHealthCheck;
-import com.graphhopper.http.health.GraphHopperStorageHealthCheck;
 import com.graphhopper.jackson.Jackson;
 import com.graphhopper.reader.gtfs.GraphHopperGtfs;
 import com.graphhopper.reader.gtfs.GtfsStorage;
-import com.graphhopper.reader.gtfs.PtEncodedValues;
+import com.graphhopper.reader.gtfs.PtRouteResource;
 import com.graphhopper.resources.*;
-import com.graphhopper.routing.util.CarFlagEncoder;
+import com.graphhopper.routing.ProfileResolver;
 import com.graphhopper.routing.util.EncodingManager;
-import com.graphhopper.routing.util.FootFlagEncoder;
-import com.graphhopper.storage.DAType;
-import com.graphhopper.storage.GHDirectory;
 import com.graphhopper.storage.GraphHopperStorage;
 import com.graphhopper.storage.index.LocationIndex;
-import com.graphhopper.util.CmdArgs;
 import com.graphhopper.util.TranslationMap;
 import io.dropwizard.ConfiguredBundle;
-import io.dropwizard.lifecycle.Managed;
 import io.dropwizard.setup.Bootstrap;
 import io.dropwizard.setup.Environment;
 import org.glassfish.hk2.api.Factory;
 import org.glassfish.hk2.utilities.binding.AbstractBinder;
 
 import javax.inject.Inject;
-import javax.ws.rs.ext.WriterInterceptor;
-import java.util.Arrays;
-import java.util.Collections;
 import java.util.List;
 import java.util.stream.Collectors;
 
@@ -89,6 +82,22 @@ public class GraphHopperBundle implements ConfiguredBundle<GraphHopperBundleConf
 
         @Override
         public void dispose(GraphHopperStorage instance) {
+
+        }
+    }
+
+    static class GtfsStorageFactory implements Factory<GtfsStorage> {
+
+        @Inject
+        GraphHopperGtfs graphHopper;
+
+        @Override
+        public GtfsStorage provide() {
+            return graphHopper.getGtfsStorage();
+        }
+
+        @Override
+        public void dispose(GtfsStorage instance) {
 
         }
     }
@@ -150,6 +159,8 @@ public class GraphHopperBundle implements ConfiguredBundle<GraphHopperBundleConf
 
         Jackson.initObjectMapper(bootstrap.getObjectMapper());
         bootstrap.getObjectMapper().setDateFormat(new StdDateFormat());
+        // See https://github.com/dropwizard/dropwizard/issues/1558
+        bootstrap.getObjectMapper().enable(MapperFeature.ALLOW_EXPLICIT_PROPERTY_RENAMING);
         // Because VirtualEdgeIteratorState has getters which throw Exceptions.
         // http://stackoverflow.com/questions/35359430/how-to-make-jackson-ignore-properties-if-the-getters-throw-exceptions
         bootstrap.getObjectMapper().registerModule(new SimpleModule().setSerializerModifier(new BeanSerializerModifier() {
@@ -171,7 +182,10 @@ public class GraphHopperBundle implements ConfiguredBundle<GraphHopperBundleConf
 
     @Override
     public void run(GraphHopperBundleConfiguration configuration, Environment environment) {
-        configuration.getGraphHopperConfiguration().merge(CmdArgs.readFromSystemProperties());
+        for (Object k : System.getProperties().keySet()) {
+            if (k instanceof String && ((String) k).startsWith("graphhopper."))
+                throw new IllegalArgumentException("You need to prefix system parameters with '-Ddw.graphhopper.' instead of '-Dgraphhopper.' see #1879 and #1897");
+        }
 
         // If the "?type=gpx" parameter is present, sets a corresponding media type header
         environment.jersey().register(new TypeGPXFilter());
@@ -184,98 +198,42 @@ public class GraphHopperBundle implements ConfiguredBundle<GraphHopperBundleConf
         environment.jersey().register(new IllegalArgumentExceptionMapper());
         environment.jersey().register(new GHPointConverterProvider());
 
-        if (configuration.getGraphHopperConfiguration().has("gtfs.file")) {
-            // switch to different API implementation when using Pt
-            runPtGraphHopper(configuration.getGraphHopperConfiguration(), environment);
-        } else {
-            runRegularGraphHopper(configuration.getGraphHopperConfiguration(), environment);
-        }
-    }
-
-    private void runPtGraphHopper(CmdArgs configuration, Environment environment) {
-        final GHDirectory ghDirectory = new GHDirectory(configuration.get("graph.location", "target/tmp"), DAType.RAM_STORE);
-        final GtfsStorage gtfsStorage = GtfsStorage.createOrLoad(ghDirectory);
-        EncodingManager encodingManager = PtEncodedValues.createAndAddEncodedValues(EncodingManager.start()).add(new CarFlagEncoder()).add(new FootFlagEncoder()).build();
-        final GraphHopperStorage graphHopperStorage = GraphHopperGtfs.createOrLoad(ghDirectory, encodingManager, gtfsStorage,
-                configuration.has("gtfs.file") ? Arrays.asList(configuration.get("gtfs.file", "").split(",")) : Collections.emptyList(),
-                configuration.has("datareader.file") ? Arrays.asList(configuration.get("datareader.file", "").split(",")) : Collections.emptyList());
-        final TranslationMap translationMap = new TranslationMap().doImport();
-        final LocationIndex locationIndex = GraphHopperGtfs.createOrLoadIndex(ghDirectory, graphHopperStorage);
-        environment.jersey().register(new AbstractBinder() {
-            @Override
-            protected void configure() {
-                bind(configuration).to(CmdArgs.class);
-                bind(false).to(Boolean.class).named("hasElevation");
-                bind(locationIndex).to(LocationIndex.class);
-                bind(translationMap).to(TranslationMap.class);
-                bind(encodingManager).to(EncodingManager.class);
-                bind(graphHopperStorage).to(GraphHopperStorage.class);
-                bind(gtfsStorage).to(GtfsStorage.class);
-            }
-        });
-        environment.jersey().register(NearestResource.class);
-        environment.jersey().register(GraphHopperGtfs.class);
-        environment.jersey().register(new PtIsochroneResource(gtfsStorage, encodingManager, graphHopperStorage, locationIndex));
-        environment.jersey().register(I18NResource.class);
-        environment.jersey().register(InfoResource.class);
-        // The included web client works best if we say we only support pt.
-        // Does not have anything to do with FlagEncoders anymore.
-        environment.jersey().register((WriterInterceptor) context -> {
-            if (context.getEntity() instanceof InfoResource.Info) {
-                InfoResource.Info info = (InfoResource.Info) context.getEntity();
-                info.supported_vehicles = new String[]{"pt"};
-                info.features.clear();
-                info.features.put("pt", new InfoResource.Info.PerVehicle());
-                context.setEntity(info);
-            }
-            context.proceed();
-        });
-        environment.lifecycle().manage(new Managed() {
-            @Override
-            public void start() {
-            }
-
-            @Override
-            public void stop() {
-                locationIndex.close();
-                gtfsStorage.close();
-                graphHopperStorage.close();
-            }
-        });
-        environment.healthChecks().register("graphhopper-storage", new GraphHopperStorageHealthCheck(graphHopperStorage));
-    }
-
-    private void runRegularGraphHopper(CmdArgs configuration, Environment environment) {
-        final GraphHopperManaged graphHopperManaged = new GraphHopperManaged(configuration, environment.getObjectMapper());
+        final GraphHopperManaged graphHopperManaged = new GraphHopperManaged(configuration.getGraphHopperConfiguration(), environment.getObjectMapper());
         environment.lifecycle().manage(graphHopperManaged);
+        final GraphHopper graphHopper = graphHopperManaged.getGraphHopper();
         environment.jersey().register(new AbstractBinder() {
             @Override
             protected void configure() {
-                bind(configuration).to(CmdArgs.class);
-                bind(graphHopperManaged).to(GraphHopperManaged.class);
-                bind(graphHopperManaged.getGraphHopper()).to(GraphHopper.class);
-                bind(graphHopperManaged.getGraphHopper()).to(GraphHopperAPI.class);
+                bind(configuration.getGraphHopperConfiguration()).to(GraphHopperConfig.class);
+                bind(graphHopper).to(GraphHopper.class);
+                bind(graphHopper).to(GraphHopperAPI.class);
+                bind(new ProfileResolver(graphHopper.getEncodingManager(), graphHopper.getProfiles(), graphHopper.getCHPreparationHandler().getCHProfileConfigs(), graphHopper.getLMPreparationHandler().getLMProfileConfigs()))
+                        .to(ProfileResolver.class);
 
                 bindFactory(HasElevation.class).to(Boolean.class).named("hasElevation");
                 bindFactory(LocationIndexFactory.class).to(LocationIndex.class);
                 bindFactory(TranslationMapFactory.class).to(TranslationMap.class);
                 bindFactory(EncodingManagerFactory.class).to(EncodingManager.class);
                 bindFactory(GraphHopperStorageFactory.class).to(GraphHopperStorage.class);
+                bindFactory(GtfsStorageFactory.class).to(GtfsStorage.class);
             }
         });
-
-        if (configuration.getBool("web.change_graph.enabled", false)) {
-            environment.jersey().register(ChangeGraphResource.class);
-        }
 
         environment.jersey().register(MVTResource.class);
         environment.jersey().register(NearestResource.class);
         environment.jersey().register(RouteResource.class);
         environment.jersey().register(IsochroneResource.class);
+        if (configuration.getGraphHopperConfiguration().has("gtfs.file")) {
+            // These are pt-specific implementations of /route and /isochrone, but the same API.
+            // We serve them under different paths (/route-pt and /isochrone-pt), and forward
+            // requests for ?vehicle=pt there.
+            environment.jersey().register(PtRouteResource.class);
+            environment.jersey().register(PtIsochroneResource.class);
+            environment.jersey().register(PtRedirectFilter.class);
+        }
         environment.jersey().register(SPTResource.class);
         environment.jersey().register(I18NResource.class);
         environment.jersey().register(InfoResource.class);
-        environment.healthChecks().register("graphhopper", new GraphHopperHealthCheck(graphHopperManaged.getGraphHopper()));
+        environment.healthChecks().register("graphhopper", new GraphHopperHealthCheck(graphHopper));
     }
-
 }
