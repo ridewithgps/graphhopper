@@ -21,10 +21,15 @@ import com.graphhopper.GraphHopper;
 import com.graphhopper.json.geo.JsonFeatureCollection;
 import com.graphhopper.reader.DataReader;
 import com.graphhopper.routing.lm.PrepareLandmarks;
-import com.graphhopper.routing.util.spatialrules.*;
+import com.graphhopper.routing.util.spatialrules.AbstractSpatialRule;
+import com.graphhopper.routing.util.spatialrules.SpatialRule;
+import com.graphhopper.routing.util.spatialrules.SpatialRuleLookup;
+import com.graphhopper.routing.util.spatialrules.SpatialRuleLookupBuilder;
 import com.graphhopper.storage.GraphHopperStorage;
-import com.graphhopper.util.shapes.Polygon;
+import com.graphhopper.storage.index.EdgeIndex;
+import org.locationtech.jts.geom.Polygon;
 
+import java.util.Collections;
 import java.util.List;
 
 /**
@@ -33,6 +38,8 @@ import java.util.List;
  * @author Peter Karich
  */
 public class GraphHopperOSM extends GraphHopper {
+    private final EdgeIndex edgeIndex = new EdgeIndex();
+
 
     private final JsonFeatureCollection landmarkSplittingFeatureCollection;
 
@@ -47,7 +54,22 @@ public class GraphHopperOSM extends GraphHopper {
 
     @Override
     protected DataReader createReader(GraphHopperStorage ghStorage) {
-        return initDataReader(new OSMReader(ghStorage));
+        return initDataReader(new OSMReader(ghStorage) {
+                @Override
+                protected void storeOsmWayID(int edgeId, long osmWayId) {
+                    super.storeOsmWayID(edgeId, osmWayId);
+                    edgeIndex.put(edgeId, osmWayId);
+                }
+
+                @Override
+                protected void finishedReading() {
+                    super.finishedReading();
+                }
+            });
+    }
+
+    public EdgeIndex getEdgeIndex() {
+        return edgeIndex;
     }
 
     public String getOSMFile() {
@@ -65,22 +87,25 @@ public class GraphHopperOSM extends GraphHopper {
 
     @Override
     protected void loadOrPrepareLM(boolean closeEarly) {
-        if (!getLMFactoryDecorator().isEnabled() || getLMFactoryDecorator().getPreparations().isEmpty())
+        if (!getLMPreparationHandler().isEnabled() || getLMPreparationHandler().getPreparations().isEmpty())
             return;
 
         if (landmarkSplittingFeatureCollection != null && !landmarkSplittingFeatureCollection.getFeatures().isEmpty()) {
-            SpatialRuleLookup ruleLookup = SpatialRuleLookupBuilder.buildIndex(landmarkSplittingFeatureCollection, "area", new SpatialRuleLookupBuilder.SpatialRuleFactory() {
-                @Override
-                public SpatialRule createSpatialRule(final String id, List<Polygon> polygons) {
-                    return new DefaultSpatialRule() {
+            SpatialRuleLookup ruleLookup = SpatialRuleLookupBuilder.buildIndex(
+                    Collections.singletonList(landmarkSplittingFeatureCollection), "area",
+                    new SpatialRuleLookupBuilder.SpatialRuleFactory() {
                         @Override
-                        public String getId() {
-                            return id;
+                        public SpatialRule createSpatialRule(final String id,
+                                        List<Polygon> polygons) {
+                            return new AbstractSpatialRule(polygons) {
+                                @Override
+                                public String getId() {
+                                    return id;
+                                }
+                            };
                         }
-                    }.setBorders(polygons);
-                }
-            });
-            for (PrepareLandmarks prep : getLMFactoryDecorator().getPreparations()) {
+                    });
+            for (PrepareLandmarks prep : getLMPreparationHandler().getPreparations()) {
                 // the ruleLookup splits certain areas from each other but avoids making this a permanent change so that other algorithms still can route through these regions.
                 if (ruleLookup != null && ruleLookup.size() > 0) {
                     prep.setSpatialRuleLookup(ruleLookup);

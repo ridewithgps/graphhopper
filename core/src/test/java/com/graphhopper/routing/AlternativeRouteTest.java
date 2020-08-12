@@ -23,12 +23,13 @@ import com.graphhopper.routing.util.CarFlagEncoder;
 import com.graphhopper.routing.util.EncodingManager;
 import com.graphhopper.routing.util.FlagEncoder;
 import com.graphhopper.routing.util.TraversalMode;
+import com.graphhopper.routing.weighting.DefaultTurnCostProvider;
 import com.graphhopper.routing.weighting.FastestWeighting;
-import com.graphhopper.routing.weighting.TurnWeighting;
+import com.graphhopper.routing.weighting.TurnCostProvider;
 import com.graphhopper.routing.weighting.Weighting;
 import com.graphhopper.storage.Graph;
+import com.graphhopper.storage.GraphBuilder;
 import com.graphhopper.storage.GraphHopperStorage;
-import com.graphhopper.storage.RAMDirectory;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.junit.runners.Parameterized;
@@ -42,17 +43,19 @@ import static org.junit.Assert.*;
 
 @RunWith(Parameterized.class)
 public class AlternativeRouteTest {
-    private final FlagEncoder carFE = new CarFlagEncoder();
     private final Weighting weighting;
     private final TraversalMode traversalMode;
     private final GraphHopperStorage graph;
 
     public AlternativeRouteTest(TraversalMode tMode) {
         this.traversalMode = tMode;
+        FlagEncoder carFE = new CarFlagEncoder();
         EncodingManager em = EncodingManager.create(carFE);
-        graph = new GraphHopperStorage(new RAMDirectory(), em, false, true);
-        graph.create(1000);
-        weighting = new TurnWeighting(new FastestWeighting(carFE), graph.getTurnCostExtension());
+        graph = new GraphBuilder(em).withTurnCosts(true).create();
+        TurnCostProvider turnCostProvider = tMode.isEdgeBased()
+                ? new DefaultTurnCostProvider(carFE, graph.getTurnCostStorage())
+                : TurnCostProvider.NO_TURN_COST_PROVIDER;
+        weighting = new FastestWeighting(carFE, turnCostProvider);
     }
 
     /**
@@ -173,7 +176,6 @@ public class AlternativeRouteTest {
         // one single disconnected node
         updateDistancesFor(graph, 20, 0.00, -0.01);
 
-        Weighting weighting = new FastestWeighting(carFE);
         AlternativeBidirSearch altDijkstra = new AlternativeBidirSearch(graph, weighting, traversalMode, 1);
         Path path = altDijkstra.calcPath(1, 20);
         assertFalse(path.isFound());

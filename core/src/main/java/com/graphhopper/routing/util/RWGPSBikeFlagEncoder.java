@@ -1,28 +1,25 @@
 package com.graphhopper.routing.util;
 
 import com.graphhopper.reader.ReaderWay;
-import com.graphhopper.util.EdgeIteratorState;
-import com.graphhopper.util.PMap;
-import com.graphhopper.util.PointList;
-import com.graphhopper.util.Helper;
-import com.graphhopper.routing.profiles.EncodedValue;
 import com.graphhopper.routing.profiles.DecimalEncodedValue;
+import com.graphhopper.routing.profiles.EncodedValue;
+import com.graphhopper.routing.profiles.RouteNetwork;
 import com.graphhopper.routing.profiles.UnsignedDecimalEncodedValue;
 import com.graphhopper.routing.util.EncodingManager;
 import com.graphhopper.routing.weighting.RWGPSWeighting;
+import com.graphhopper.routing.weighting.RWGPSWithoutPopularityWeighting;
 import com.graphhopper.storage.IntsRef;
-import static com.graphhopper.routing.util.PriorityCode.*;
-
-import java.util.TreeMap;
+import com.graphhopper.util.Helper;
+import com.graphhopper.util.PMap;
 import java.util.List;
-
+import java.util.TreeMap;
+import static com.graphhopper.routing.util.PriorityCode.*;
 
 public class RWGPSBikeFlagEncoder extends BikeFlagEncoder {
     private DecimalEncodedValue priorityEncoder;
 
     public RWGPSBikeFlagEncoder(PMap properties) {
         super(properties);
-        setCyclingNetworkPreference("mtb", AVOID_IF_POSSIBLE.getValue());
     }
 
     @Override
@@ -41,17 +38,39 @@ public class RWGPSBikeFlagEncoder extends BikeFlagEncoder {
     }
 
     @Override
-    void handleBikeRelated(IntsRef edgeFlags, ReaderWay way, boolean partOfCycleRelation) {
-        super.handleBikeRelated(edgeFlags, way, partOfCycleRelation);
+    public IntsRef handleWayTags(IntsRef edgeFlags, ReaderWay way, EncodingManager.Access access) {
+        IntsRef flags = super.handleWayTags(edgeFlags, way, access);
+        RouteNetwork network = bikeRouteEnc.getEnum(false, flags);
+        boolean partOfCycleRelation = RouteNetwork.INTERNATIONAL.equals(network) ||
+            RouteNetwork.NATIONAL.equals(network) ||
+            RouteNetwork.REGIONAL.equals(network) ||
+            RouteNetwork.LOCAL.equals(network);
 
-        double cost = 0.6;
+        priorityEncoder.setDecimal(false, flags, calcCost(way, partOfCycleRelation));
+
+        return flags;
+    }
+
+    double calcCost(ReaderWay way, boolean partOfCycleRelation) {
+        double cost = 0.8;
 
         if (isBikePath(way)) {
-            cost = 0.225;
+            cost = 0.6;
         } else if (isBikeLane(way)) {
-            cost = 0.35;
+            cost = 0.7;
         } else if (isSharedBikeLane(way)) {
-            cost = 0.40;
+            cost = 0.75;
+        } else if (way.hasTag("highway", "track")) {
+            if (way.hasTag("tracktype", "grade1")) {
+                cost = 0.6;
+            } else if (way.hasTag("tracktype", "grade2")) {
+                cost = 0.7;
+            } else if (way.hasTag("tracktype", "grade3")) {
+                cost = 0.8;
+            } else {
+                // this includes grades 4, 5, and no value for tracktype
+                cost = 1.0;
+            }
         } else if (way.hasTag("highway", "motorway", "trunk")) {
             cost = 2.5;
         } else if (way.hasTag("highway", "path", "track") &&
@@ -61,22 +80,38 @@ public class RWGPSBikeFlagEncoder extends BikeFlagEncoder {
 
         // encourage riding on cycling networks
         if (partOfCycleRelation) {
-            cost *= 0.8;
+            cost *= 0.65;
         }
 
-        // massively penalize mountain bike paths
-        if (way.hasTag("mtb:scale") || way.hasTag("mtb")) {
-            cost *= 10;
+        // discourage riding on MTB trails
+        String mtbScale = way.getTag("mtb:scale");
+        if (mtbScale != null) {
+            double mtbFactor = 1;
+
+            if (mtbScale.equals("0-")) {
+                mtbFactor = 1.5;
+            } else if (mtbScale.equals("0")) {
+                mtbFactor = 2;
+            } else if (mtbScale.equals("0+")) {
+                // same penalty as RLIS:bicycle=caution_area
+                mtbFactor = 2.5;
+            } else {
+                // large penalty to all other types
+                mtbFactor = 2.5;
+            }
+
+            cost *= mtbFactor;
         }
 
         // penalize bike caution_area
         if (way.hasTag("RLIS:bicycle", "caution_area")) {
-            cost *= 2;
+            // same penalty as mtb:scale=0+
+            cost *= 1.25;
         }
 
         // only increase cost from road features if we're riding on the road
         if (!way.hasTag("cycleway", "track") && !isBikePath(way)) {
-            // increase cost if number of lanes greater than two
+            // increase cost for too many lanes
             double lanes = getLanes(way);
             if (lanes > 3) {
                 cost += 0.05;
@@ -88,7 +123,7 @@ public class RWGPSBikeFlagEncoder extends BikeFlagEncoder {
             }
         }
 
-        priorityEncoder.setDecimal(false, edgeFlags, cost);
+        return cost;
     }
 
     @Override
@@ -154,7 +189,7 @@ public class RWGPSBikeFlagEncoder extends BikeFlagEncoder {
         if (super.supports(feature))
             return true;
 
-        return RWGPSWeighting.class.isAssignableFrom(feature);
+        return RWGPSWeighting.class.isAssignableFrom(feature) || RWGPSWithoutPopularityWeighting.class.isAssignableFrom(feature);
     }
 
     @Override

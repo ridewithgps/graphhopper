@@ -19,6 +19,7 @@ package com.graphhopper.storage;
 
 import com.graphhopper.routing.util.AllEdgesIterator;
 import com.graphhopper.routing.util.EdgeFilter;
+import com.graphhopper.routing.weighting.Weighting;
 import com.graphhopper.util.EdgeExplorer;
 import com.graphhopper.util.EdgeIteratorState;
 import com.graphhopper.util.shapes.BBox;
@@ -47,7 +48,7 @@ public interface Graph {
     int getEdges();
 
     /**
-     * Creates a node explorer to access node properties.
+     * Creates an object to access node properties.
      */
     NodeAccess getNodeAccess();
 
@@ -118,7 +119,12 @@ public interface Graph {
     Graph copyTo(Graph g);
 
     /**
-     * @return the {@link TurnCostExtension} or null if not supported
+     * @return the {@link TurnCostStorage} or null if not supported
      */
-    TurnCostExtension getTurnCostExtension();
+    TurnCostStorage getTurnCostStorage();
+
+    /**
+     * Wraps the given weighting into a weighting that can be used by this graph
+     */
+    Weighting wrapWeighting(Weighting weighting);
 }

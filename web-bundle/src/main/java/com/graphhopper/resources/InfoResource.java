@@ -17,7 +17,11 @@
  */
 package com.graphhopper.resources;
 
+import com.graphhopper.GraphHopperConfig;
 import com.graphhopper.storage.GraphHopperStorage;
+import com.graphhopper.storage.CHProfile;
+import com.graphhopper.routing.weighting.Weighting;
+import com.graphhopper.routing.util.FlagEncoder;
 import com.graphhopper.util.Constants;
 import com.graphhopper.util.shapes.BBox;
 
@@ -27,8 +31,7 @@ import javax.ws.rs.GET;
 import javax.ws.rs.Path;
 import javax.ws.rs.Produces;
 import javax.ws.rs.core.MediaType;
-import java.util.HashMap;
-import java.util.Map;
+import java.util.*;
 
 /**
  * @author Peter Karich
@@ -36,12 +39,14 @@ import java.util.Map;
 @Path("info")
 @Produces(MediaType.APPLICATION_JSON)
 public class InfoResource {
-    private final GraphHopperStorage storage;
 
-    private boolean hasElevation;
+    private final GraphHopperConfig config;
+    private final GraphHopperStorage storage;
+    private final boolean hasElevation;
 
     @Inject
-    public InfoResource(GraphHopperStorage storage, @Named("hasElevation") Boolean hasElevation) {
+    public InfoResource(GraphHopperConfig config, GraphHopperStorage storage, @Named("hasElevation") Boolean hasElevation) {
+        this.config = config;
         this.storage = storage;
         this.hasElevation = hasElevation;
     }
@@ -49,10 +54,12 @@ public class InfoResource {
     public static class Info {
         public static class PerVehicle {
             public boolean elevation;
+            public boolean turn_costs;
+            public List<String> weightings;
         }
 
         public BBox bbox;
-        public String[] supported_vehicles;
+        public List<String> supported_vehicles;
         public final Map<String, PerVehicle> features = new HashMap<>();
         public String version = Constants.VERSION;
         public String build_date = Constants.BUILD_DATE;
@@ -67,11 +74,26 @@ public class InfoResource {
         final Info info = new Info();
         // use bbox always without elevation (for backward compatibility)
         info.bbox = new BBox(storage.getBounds().minLon, storage.getBounds().maxLon, storage.getBounds().minLat, storage.getBounds().maxLat);
-        info.supported_vehicles = storage.getEncodingManager().toString().split(",");
-        for (String v : info.supported_vehicles) {
-            Info.PerVehicle perVehicleJson = new Info.PerVehicle();
+        if (config.has("gtfs.file")) {
+            info.supported_vehicles.add("pt");
+        }
+        if (config.has("gtfs.file")) {
+            info.features.put("pt", new InfoResource.Info.PerVehicle());
+        }
+        List<FlagEncoder> flagEncoders = storage.getEncodingManager().fetchEdgeEncoders();
+        for (FlagEncoder encoder: flagEncoders) {
+            final Info.PerVehicle perVehicleJson = new Info.PerVehicle();
             perVehicleJson.elevation = hasElevation;
-            info.features.put(v, perVehicleJson);
+            perVehicleJson.turn_costs = encoder.supportsTurnCosts();
+            final List<String> weightings = new ArrayList<>();
+            for (CHProfile profile: storage.getCHProfiles()) {
+                final Weighting weighting = profile.getWeighting();
+                if (weighting.getFlagEncoder().equals(encoder)) {
+                    weightings.add(weighting.getName());
+                }
+            }
+            perVehicleJson.weightings = weightings;
+            info.features.put(encoder.toString(), perVehicleJson);
         }
         info.import_date = storage.getProperties().get("datareader.import.date");
         info.data_date = storage.getProperties().get("datareader.data.date");

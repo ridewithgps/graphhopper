@@ -22,7 +22,6 @@ import com.graphhopper.routing.profiles.EncodedValue;
 import com.graphhopper.routing.profiles.EncodedValueLookup;
 import com.graphhopper.routing.profiles.EnumEncodedValue;
 import com.graphhopper.routing.profiles.Surface;
-import com.graphhopper.routing.util.EncodingManager;
 import com.graphhopper.storage.IntsRef;
 import com.graphhopper.util.Helper;
 
@@ -48,8 +47,8 @@ public class OSMSurfaceParser implements TagParser {
     }
 
     @Override
-    public IntsRef handleWayTags(IntsRef edgeFlags, ReaderWay way, EncodingManager.Access access, long relationFlags) {
-        String surfaceTag = way.getTag("surface");
+    public IntsRef handleWayTags(IntsRef edgeFlags, ReaderWay readerWay, boolean ferry, IntsRef relationFlags) {
+        String surfaceTag = readerWay.getTag("surface");
         Surface surface = Surface.find(surfaceTag);
         if (surface == OTHER) {
             if (!Helper.isEmpty(surfaceTag)) {

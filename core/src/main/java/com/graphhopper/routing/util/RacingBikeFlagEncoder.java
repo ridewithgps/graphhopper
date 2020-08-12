@@ -22,6 +22,7 @@ import com.graphhopper.util.PMap;
 
 import java.util.TreeMap;
 
+import static com.graphhopper.routing.profiles.RouteNetwork.*;
 import static com.graphhopper.routing.util.PriorityCode.*;
 
 /**
@@ -36,17 +37,16 @@ public class RacingBikeFlagEncoder extends BikeCommonFlagEncoder {
     }
 
     public RacingBikeFlagEncoder(PMap properties) {
-        this((int) properties.getLong("speed_bits", 4),
+        this(properties.getInt("speed_bits", 4),
                 properties.getDouble("speed_factor", 2),
                 properties.getBool("turn_costs", false) ? 1 : 0);
-        this.setBlockFords(properties.getBool("block_fords", true));
+
+        blockBarriersByDefault(properties.getBool("block_barriers", false));
+        blockPrivate(properties.getBool("block_private", true));
+        blockFords(properties.getBool("block_fords", false));
     }
 
-    public RacingBikeFlagEncoder(String propertiesStr) {
-        this(new PMap(propertiesStr));
-    }
-
-    public RacingBikeFlagEncoder(int speedBits, double speedFactor, int maxTurnCosts) {
+    protected RacingBikeFlagEncoder(int speedBits, double speedFactor, int maxTurnCosts) {
         super(speedBits, speedFactor, maxTurnCosts);
         preferHighwayTags.add("road");
         preferHighwayTags.add("secondary");
@@ -113,18 +113,15 @@ public class RacingBikeFlagEncoder extends BikeCommonFlagEncoder {
         addPushingSection("pedestrian");
         addPushingSection("steps");
 
-        setCyclingNetworkPreference("icn", PriorityCode.BEST.getValue());
-        setCyclingNetworkPreference("ncn", PriorityCode.BEST.getValue());
-        setCyclingNetworkPreference("rcn", PriorityCode.VERY_NICE.getValue());
-        setCyclingNetworkPreference("lcn", PriorityCode.UNCHANGED.getValue());
-        setCyclingNetworkPreference("mtb", PriorityCode.UNCHANGED.getValue());
+        routeMap.put(INTERNATIONAL, BEST.getValue());
+        routeMap.put(NATIONAL, BEST.getValue());
+        routeMap.put(REGIONAL, VERY_NICE.getValue());
+        routeMap.put(LOCAL, UNCHANGED.getValue());
 
         absoluteBarriers.add("kissing_gate");
 
         setAvoidSpeedLimit(81);
         setSpecificClassBicycle("roadcycling");
-
-        init();
     }
 
     @Override
@@ -141,16 +138,6 @@ public class RacingBikeFlagEncoder extends BikeCommonFlagEncoder {
             else if (trackType == null || trackType.startsWith("grade"))
                 weightToPrioMap.put(110d, AVOID_AT_ALL_COSTS.getValue());
         }
-    }
-
-    @Override
-    boolean isPushingSection(ReaderWay way) {
-        String highway = way.getTag("highway");
-        String trackType = way.getTag("tracktype");
-        return way.hasTag("highway", pushingSectionsHighways)
-                || way.hasTag("railway", "platform")
-                || way.hasTag("bicycle", "dismount")
-                || "track".equals(highway) && trackType != null && !"grade1".equals(trackType);
     }
 
     @Override

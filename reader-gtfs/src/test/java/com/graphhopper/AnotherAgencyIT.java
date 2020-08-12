@@ -20,13 +20,11 @@ package com.graphhopper;
 
 import com.carrotsearch.hppc.IntHashSet;
 import com.graphhopper.reader.gtfs.*;
-import com.graphhopper.routing.util.*;
+import com.graphhopper.routing.util.AllEdgesIterator;
 import com.graphhopper.routing.weighting.FastestWeighting;
-import com.graphhopper.storage.DAType;
-import com.graphhopper.storage.GHDirectory;
-import com.graphhopper.storage.GraphHopperStorage;
-import com.graphhopper.storage.index.LocationIndex;
-import com.graphhopper.util.*;
+import com.graphhopper.util.EdgeIteratorState;
+import com.graphhopper.util.Helper;
+import com.graphhopper.util.TranslationMap;
 import org.junit.AfterClass;
 import org.junit.BeforeClass;
 import org.junit.Test;
@@ -39,35 +37,33 @@ import java.util.Arrays;
 import java.util.Collections;
 
 import static com.graphhopper.reader.gtfs.GtfsHelper.time;
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.*;
 
 public class AnotherAgencyIT {
 
     private static final String GRAPH_LOC = "target/AnotherAgencyIT";
-    private static GraphHopperGtfs graphHopper;
+    private static PtRouteResource ptRouteResource;
     private static final ZoneId zoneId = ZoneId.of("America/Los_Angeles");
-    private static GraphHopperStorage graphHopperStorage;
-    private static LocationIndex locationIndex;
-    private static GtfsStorage gtfsStorage;
+    private static GraphHopperGtfs graphHopperGtfs;
 
     @BeforeClass
     public static void init() {
+        GraphHopperConfig ghConfig = new GraphHopperConfig();
+        ghConfig.putObject("graph.flag_encoders", "car,foot");
+        ghConfig.putObject("graph.location", GRAPH_LOC);
+        ghConfig.putObject("datareader.file", "files/beatty.osm");
+        ghConfig.putObject("gtfs.file", "files/sample-feed.zip,files/another-sample-feed.zip");
         Helper.removeDir(new File(GRAPH_LOC));
-        EncodingManager encodingManager = PtEncodedValues.createAndAddEncodedValues(EncodingManager.start()).add(new FootFlagEncoder()).build();
-        GHDirectory directory = new GHDirectory(GRAPH_LOC, DAType.RAM_STORE);
-        gtfsStorage = GtfsStorage.createOrLoad(directory);
-        graphHopperStorage = GraphHopperGtfs.createOrLoad(directory, encodingManager, gtfsStorage, Arrays.asList("files/sample-feed.zip", "files/another-sample-feed.zip"), Arrays.asList("files/beatty.osm"));
-        locationIndex = GraphHopperGtfs.createOrLoadIndex(directory, graphHopperStorage);
-        graphHopper = GraphHopperGtfs.createFactory(new TranslationMap().doImport(), graphHopperStorage, locationIndex, gtfsStorage)
+        graphHopperGtfs = new GraphHopperGtfs(ghConfig);
+        graphHopperGtfs.init(ghConfig);
+        graphHopperGtfs.importOrLoad();
+        ptRouteResource = PtRouteResource.createFactory(new TranslationMap().doImport(), graphHopperGtfs, graphHopperGtfs.getLocationIndex(), graphHopperGtfs.getGtfsStorage())
                 .createWithoutRealtimeFeed();
     }
 
     @AfterClass
     public static void close() {
-        graphHopperStorage.close();
-        locationIndex.close();
-        gtfsStorage.close();
+        graphHopperGtfs.close();
     }
 
     @Test
@@ -77,16 +73,48 @@ public class AnotherAgencyIT {
                         new GHStationLocation("JUSTICE_COURT"),
                         new GHStationLocation("MUSEUM")
                 ),
-                LocalDateTime.of(2007,1,1,8,30,0).atZone(zoneId).toInstant()
+                LocalDateTime.of(2007, 1, 1, 8, 30, 0).atZone(zoneId).toInstant()
         );
         ghRequest.setIgnoreTransfers(true);
         ghRequest.setWalkSpeedKmH(0.005); // Prevent walk solution
-        GHResponse route = graphHopper.route(ghRequest);
+        GHResponse route = ptRouteResource.route(ghRequest);
 
         assertFalse(route.hasErrors());
         assertEquals(1, route.getAll().size());
         PathWrapper transitSolution = route.getBest();
-        assertEquals("Expected total travel time == scheduled travel time + wait time", time(1, 30), transitSolution.getTime(), 0.1);
+        assertEquals("Expected total travel time == scheduled travel time + wait time", time(1, 30), transitSolution.getTime());
+    }
+
+    @Test
+    public void testRoute2() {
+        Request ghRequest = new Request(
+                Arrays.asList(
+                        new GHStationLocation("JUSTICE_COURT"),
+                        new GHStationLocation("AIRPORT")
+                ),
+                LocalDateTime.of(2007, 1, 1, 8, 30, 0).atZone(zoneId).toInstant()
+        );
+        ghRequest.setIgnoreTransfers(true);
+        ghRequest.setWalkSpeedKmH(0.005); // Prevent walk solution
+        GHResponse route = ptRouteResource.route(ghRequest);
+
+        assertFalse(route.hasErrors());
+        assertEquals(1, route.getAll().size());
+        PathWrapper transitSolution = route.getBest();
+        assertEquals(2, transitSolution.getLegs().size());
+        Trip.PtLeg ptLeg1 = (Trip.PtLeg) transitSolution.getLegs().get(0);
+        assertEquals("COURT2MUSEUM", ptLeg1.route_id);
+        assertEquals("MUSEUM1", ptLeg1.trip_id);
+        assertEquals("JUSTICE_COURT", ptLeg1.stops.get(0).stop_id);
+        assertEquals("MUSEUM", ptLeg1.stops.get(1).stop_id);
+
+        Trip.PtLeg ptLeg2 = (Trip.PtLeg) transitSolution.getLegs().get(1);
+        assertEquals("MUSEUM2AIRPORT", ptLeg2.route_id);
+        assertEquals("MUSEUMAIRPORT1", ptLeg2.trip_id);
+        assertEquals("NEXT_TO_MUSEUM", ptLeg2.stops.get(0).stop_id);
+        assertEquals("AIRPORT", ptLeg2.stops.get(1).stop_id);
+
+        assertEquals("Expected total travel time == scheduled travel time + wait time", time(2, 10), transitSolution.getTime());
     }
 
     @Test
@@ -95,8 +123,8 @@ public class AnotherAgencyIT {
         // The implementation doesn't allow it, and would produce subsequent failures, because
         // feed-specific things are encoded in edge attributes along routes.
         // We will model such transfers by going through the walk network.
-        PtEncodedValues ptEncodedValues = PtEncodedValues.fromEncodingManager(graphHopperStorage.getEncodingManager());
-        AllEdgesIterator allEdges = graphHopperStorage.getAllEdges();
+        PtEncodedValues ptEncodedValues = PtEncodedValues.fromEncodingManager(graphHopperGtfs.getEncodingManager());
+        AllEdgesIterator allEdges = graphHopperGtfs.getGraphHopperStorage().getAllEdges();
         while (allEdges.next()) {
             GtfsStorage.EdgeType edgeType = allEdges.get(ptEncodedValues.getTypeEnc());
             if (edgeType == GtfsStorage.EdgeType.TRANSFER) {
@@ -108,13 +136,13 @@ public class AnotherAgencyIT {
 
     private IntHashSet findFeedIdsReachableOnPTNetworkFrom(int adjNode) {
         // TODO: Clean up those routers, so that tests like this are way easier to implement
-        PtEncodedValues ptEncodedValues = PtEncodedValues.fromEncodingManager(graphHopperStorage.getEncodingManager());
+        PtEncodedValues ptEncodedValues = PtEncodedValues.fromEncodingManager(graphHopperGtfs.getEncodingManager());
         GraphExplorer graphExplorer = new GraphExplorer(
-                graphHopperStorage,
-                new FastestWeighting(graphHopperStorage.getEncodingManager().getEncoder("foot")),
+                graphHopperGtfs.getGraphHopperStorage(),
+                new FastestWeighting(graphHopperGtfs.getEncodingManager().getEncoder("foot")),
                 ptEncodedValues,
-                gtfsStorage,
-                RealtimeFeed.empty(gtfsStorage),
+                graphHopperGtfs.getGtfsStorage(),
+                RealtimeFeed.empty(graphHopperGtfs.getGtfsStorage()),
                 false,
                 false,
                 5.0,
@@ -131,20 +159,20 @@ public class AnotherAgencyIT {
                 Collections.emptyList()
         );
         router.calcLabels(adjNode, Instant.now(), 0)
-        .forEach(l -> {
-            if (l.parent == null) return;
-            EdgeIteratorState edgeIteratorState = graphHopperStorage.getEdgeIteratorState(l.edge, l.adjNode);
-            Label.EdgeLabel edgeLabel = Label.getEdgeLabel(edgeIteratorState, ptEncodedValues);
-            if (edgeLabel.edgeType == GtfsStorage.EdgeType.LEAVE_TIME_EXPANDED_NETWORK) {
-                seenIds.add(edgeLabel.timeZoneId);
-            }
-        });
+                .forEach(l -> {
+                    if (l.parent == null) return;
+                    EdgeIteratorState edgeIteratorState = graphHopperGtfs.getGraphHopperStorage().getEdgeIteratorState(l.edge, l.adjNode);
+                    Label.EdgeLabel edgeLabel = Label.getEdgeLabel(edgeIteratorState, ptEncodedValues);
+                    if (edgeLabel.edgeType == GtfsStorage.EdgeType.LEAVE_TIME_EXPANDED_NETWORK) {
+                        seenIds.add(edgeLabel.timeZoneId);
+                    }
+                });
         graphExplorer = new GraphExplorer(
-                graphHopperStorage,
-                new FastestWeighting(graphHopperStorage.getEncodingManager().getEncoder("foot")),
+                graphHopperGtfs.getGraphHopperStorage(),
+                new FastestWeighting(graphHopperGtfs.getEncodingManager().getEncoder("foot")),
                 ptEncodedValues,
-                gtfsStorage,
-                RealtimeFeed.empty(gtfsStorage),
+                graphHopperGtfs.getGtfsStorage(),
+                RealtimeFeed.empty(graphHopperGtfs.getGtfsStorage()),
                 true,
                 false,
                 5.0,
@@ -162,7 +190,7 @@ public class AnotherAgencyIT {
         router.calcLabels(adjNode, Instant.now(), 0)
                 .forEach(l -> {
                     if (l.parent == null) return;
-                    EdgeIteratorState edgeIteratorState = graphHopperStorage.getEdgeIteratorState(l.edge, l.parent.adjNode);
+                    EdgeIteratorState edgeIteratorState = graphHopperGtfs.getGraphHopperStorage().getEdgeIteratorState(l.edge, l.parent.adjNode);
                     Label.EdgeLabel edgeLabel = Label.getEdgeLabel(edgeIteratorState, ptEncodedValues);
                     if (edgeLabel.edgeType == GtfsStorage.EdgeType.ENTER_TIME_EXPANDED_NETWORK) {
                         seenIds.add(edgeLabel.timeZoneId);

@@ -151,7 +151,7 @@ public abstract class ReaderElement {
     /**
      * Check that a given tag has one of the specified values.
      */
-    public final boolean hasTag(String key, Set<String> values) {
+    public final boolean hasTag(String key, Collection<String> values) {
         String[] parts = getTag(key, "").split(";");
         for (String part : parts) {
             if (values.contains(part)) {
@@ -165,7 +165,7 @@ public abstract class ReaderElement {
      * Check a number of tags in the given order for the any of the given values. Used to parse
      * hierarchical access restrictions
      */
-    public boolean hasTag(List<String> keyList, Set<String> values) {
+    public boolean hasTag(List<String> keyList, Collection<String> values) {
         for (String key : keyList) {
             if (hasTag(key, values)) {
                 return true;

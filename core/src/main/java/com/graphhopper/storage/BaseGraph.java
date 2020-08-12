@@ -27,6 +27,7 @@ import com.graphhopper.routing.profiles.IntEncodedValue;
 import com.graphhopper.routing.util.AllEdgesIterator;
 import com.graphhopper.routing.util.EdgeFilter;
 import com.graphhopper.routing.util.EncodingManager;
+import com.graphhopper.routing.weighting.Weighting;
 import com.graphhopper.search.StringIndex;
 import com.graphhopper.util.*;
 import com.graphhopper.util.shapes.BBox;
@@ -49,8 +50,9 @@ import static com.graphhopper.util.Helper.nf;
  * loadExisting, (4) usage, (5) flush, (6) close
  */
 class BaseGraph implements Graph {
-    // currently distances are stored as 4 byte integers. using a conversion factor of 1000 the minimum distance
-    // that is not considered zero is 0.0005m (=0.5mm) and the maximum distance per edge is about 2.147.483m=2147km
+    // Currently distances are stored as 4 byte integers. using a conversion factor of 1000 the minimum distance
+    // that is not considered zero is 0.0005m (=0.5mm) and the maximum distance per edge is about 2.147.483m=2147km.
+    // See OSMReader.addEdge and #1871.
     private static final double INT_DIST_FACTOR = 1000d;
     static double MAX_DIST = Integer.MAX_VALUE / INT_DIST_FACTOR;
 
@@ -61,7 +63,7 @@ class BaseGraph implements Graph {
     private final static String STRING_IDX_NAME_KEY = "name";
     final StringIndex stringIndex;
     // can be null if turn costs are not supported
-    final TurnCostExtension turnCostExtension;
+    final TurnCostStorage turnCostStorage;
     final BitUtil bitUtil;
     final EncodingManager encodingManager;
     final EdgeAccess edgeAccess;
@@ -111,7 +113,19 @@ class BaseGraph implements Graph {
         this.listener = listener;
         this.edgeAccess = new EdgeAccess(edges) {
             @Override
-            final EdgeIterable createSingleEdge(EdgeFilter filter) {
+            EdgeIteratorState getEdgeProps(int edgeId, int adjNode, EdgeFilter edgeFilter) {
+                if (edgeId <= EdgeIterator.NO_EDGE)
+                    throw new IllegalStateException("edgeId invalid " + edgeId + ", " + this);
+
+                BaseGraph.EdgeIterable edge = createSingleEdge(edgeFilter);
+                if (edge.init(edgeId, adjNode))
+                    return edge;
+
+                // if edgeId exists but adjacent nodes do not match
+                return null;
+            }
+
+            private EdgeIterable createSingleEdge(EdgeFilter filter) {
                 return new EdgeIterable(BaseGraph.this, this, filter);
             }
 
@@ -149,9 +163,9 @@ class BaseGraph implements Graph {
         this.bounds = BBox.createInverse(withElevation);
         this.nodeAccess = new GHNodeAccess(this, withElevation);
         if (withTurnCosts) {
-            turnCostExtension = new TurnCostExtension(nodeAccess, dir.find("turn_costs"));
+            turnCostStorage = new TurnCostStorage(this, dir.find("turn_costs"));
         } else {
-            turnCostExtension = null;
+            turnCostStorage = null;
         }
         if (segmentSize >= 0) {
             setSegmentSize(segmentSize);
@@ -169,10 +183,15 @@ class BaseGraph implements Graph {
         return this;
     }
 
-    void checkInit() {
+    void checkNotInitialized() {
         if (initialized)
             throw new IllegalStateException("You cannot configure this GraphStorage "
                     + "after calling create or loadExisting. Calling one of the methods twice is also not allowed.");
+    }
+
+    void checkInitialized() {
+        if (!initialized)
+            throw new IllegalStateException("The graph has not yet been initialized.");
     }
 
     protected int loadNodesHeader() {
@@ -218,7 +237,7 @@ class BaseGraph implements Graph {
         edges.setHeader(0, edgeEntryBytes);
         edges.setHeader(1 * 4, edgeCount);
         edges.setHeader(2 * 4, encodingManager.hashCode());
-        edges.setHeader(3 * 4, supportsTurnCosts() ? turnCostExtension.hashCode() : -1);
+        edges.setHeader(3 * 4, supportsTurnCosts() ? turnCostStorage.hashCode() : -1);
         return 5;
     }
 
@@ -265,7 +284,7 @@ class BaseGraph implements Graph {
     }
 
     boolean supportsTurnCosts() {
-        return turnCostExtension != null;
+        return turnCostStorage != null;
     }
 
     /**
@@ -277,7 +296,7 @@ class BaseGraph implements Graph {
         }
         if (supportsTurnCosts()) {
             for (long pointer = oldCapacity + N_TC; pointer < newCapacity; pointer += nodeEntryBytes) {
-                nodes.setInt(pointer, TurnCostExtension.NO_TURN_ENTRY);
+                nodes.setInt(pointer, TurnCostStorage.NO_TURN_ENTRY);
             }
         }
     }
@@ -304,8 +323,7 @@ class BaseGraph implements Graph {
      * extend byte capacity
      */
     final void ensureNodeIndex(int nodeIndex) {
-        if (!initialized)
-            throw new AssertionError("The graph has not yet been initialized.");
+        checkInitialized();
 
         if (nodeIndex < nodeCount)
             return;
@@ -345,13 +363,13 @@ class BaseGraph implements Graph {
     }
 
     private void setSegmentSize(int bytes) {
-        checkInit();
+        checkNotInitialized();
         nodes.setSegmentSize(bytes);
         edges.setSegmentSize(bytes);
         wayGeometry.setSegmentSize(bytes);
         stringIndex.setSegmentSize(bytes);
         if (supportsTurnCosts()) {
-            turnCostExtension.setSegmentSize(bytes);
+            turnCostStorage.setSegmentSize(bytes);
         }
     }
 
@@ -380,7 +398,7 @@ class BaseGraph implements Graph {
         wayGeometry.create(initSize);
         stringIndex.create(initSize);
         if (supportsTurnCosts()) {
-            turnCostExtension.create(initSize);
+            turnCostStorage.create(initSize);
         }
         initStorage();
         // 0 stands for no separate geoRef
@@ -456,7 +474,7 @@ class BaseGraph implements Graph {
         edges.flush();
         nodes.flush();
         if (supportsTurnCosts()) {
-            turnCostExtension.flush();
+            turnCostStorage.flush();
         }
     }
 
@@ -468,13 +486,13 @@ class BaseGraph implements Graph {
         edges.close();
         nodes.close();
         if (supportsTurnCosts()) {
-            turnCostExtension.close();
+            turnCostStorage.close();
         }
     }
 
     long getCapacity() {
         return edges.getCapacity() + nodes.getCapacity() + stringIndex.getCapacity()
-                + wayGeometry.getCapacity() + (supportsTurnCosts() ? turnCostExtension.getCapacity() : 0);
+                + wayGeometry.getCapacity() + (supportsTurnCosts() ? turnCostStorage.getCapacity() : 0);
     }
 
     long getMaxGeoRef() {
@@ -498,7 +516,7 @@ class BaseGraph implements Graph {
         if (!stringIndex.loadExisting())
             throw new IllegalStateException("Cannot load name index. corrupt file or directory? " + dir);
 
-        if (supportsTurnCosts() && !turnCostExtension.loadExisting())
+        if (supportsTurnCosts() && !turnCostStorage.loadExisting())
             throw new IllegalStateException("Cannot load turn cost storage. corrupt file or directory? " + dir);
 
         // first define header indices of this storage
@@ -522,7 +540,7 @@ class BaseGraph implements Graph {
         // copy the rest with higher level API
         to.setDistance(from.getDistance()).
                 setName(from.getName()).
-                setWayGeometry(from.fetchWayGeometry(0));
+                setWayGeometry(from.fetchWayGeometry(FetchMode.PILLAR_ONLY));
 
         return to;
     }
@@ -570,7 +588,7 @@ class BaseGraph implements Graph {
         if (!edgeAccess.isInBounds(edgeId))
             throw new IllegalStateException("edgeId " + edgeId + " out of bounds");
         checkAdjNodeBounds(adjNode);
-        return edgeAccess.getEdgeProps(edgeId, adjNode);
+        return edgeAccess.getEdgeProps(edgeId, adjNode, EdgeFilter.ALL_EDGES);
     }
 
     final void checkAdjNodeBounds(int adjNode) {
@@ -635,9 +653,9 @@ class BaseGraph implements Graph {
         wayGeometry.copyTo(clonedG.wayGeometry);
         clonedG.loadWayGeometryHeader();
 
-        // turn cost extension
+        // turn cost storage
         if (supportsTurnCosts()) {
-            turnCostExtension.copyTo(clonedG.turnCostExtension);
+            turnCostStorage.copyTo(clonedG.turnCostStorage);
         }
 
         if (removedNodes == null)
@@ -821,8 +839,13 @@ class BaseGraph implements Graph {
     }
 
     @Override
-    public TurnCostExtension getTurnCostExtension() {
-        return turnCostExtension;
+    public TurnCostStorage getTurnCostStorage() {
+        return turnCostStorage;
+    }
+
+    @Override
+    public Weighting wrapWeighting(Weighting weighting) {
+        return weighting;
     }
 
     @Override
@@ -927,7 +950,14 @@ class BaseGraph implements Graph {
         return bytes;
     }
 
-    private PointList fetchWayGeometry_(long edgePointer, boolean reverse, int mode, int baseNode, int adjNode) {
+    private PointList fetchWayGeometry_(long edgePointer, boolean reverse, FetchMode mode, int baseNode, int adjNode) {
+        if (mode == FetchMode.TOWER_ONLY) {
+            // no reverse handling required as adjNode and baseNode is already properly switched
+            PointList pillarNodes = new PointList(2, nodeAccess.is3D());
+            pillarNodes.add(nodeAccess, baseNode);
+            pillarNodes.add(nodeAccess, adjNode);
+            return pillarNodes;
+        }
         long geoRef = Helper.toUnsignedLong(edges.getInt(edgePointer + E_GEO));
         int count = 0;
         byte[] bytes = null;
@@ -938,14 +968,14 @@ class BaseGraph implements Graph {
             geoRef += 4L;
             bytes = new byte[count * nodeAccess.getDimension() * 4];
             wayGeometry.getBytes(geoRef, bytes, bytes.length);
-        } else if (mode == 0)
+        } else if (mode == FetchMode.PILLAR_ONLY)
             return PointList.EMPTY;
 
-        PointList pillarNodes = new PointList(count + mode, nodeAccess.is3D());
+        PointList pillarNodes = new PointList(getPointListLength(count, mode), nodeAccess.is3D());
         if (reverse) {
-            if ((mode & 2) != 0)
+            if (mode == FetchMode.ALL || mode == FetchMode.PILLAR_AND_ADJ)
                 pillarNodes.add(nodeAccess, adjNode);
-        } else if ((mode & 1) != 0)
+        } else if (mode == FetchMode.ALL || mode == FetchMode.BASE_AND_PILLAR)
             pillarNodes.add(nodeAccess, baseNode);
 
         int index = 0;
@@ -963,14 +993,29 @@ class BaseGraph implements Graph {
         }
 
         if (reverse) {
-            if ((mode & 1) != 0)
+            if (mode == FetchMode.ALL || mode == FetchMode.BASE_AND_PILLAR)
                 pillarNodes.add(nodeAccess, baseNode);
 
             pillarNodes.reverse();
-        } else if ((mode & 2) != 0)
+        } else if (mode == FetchMode.ALL || mode == FetchMode.PILLAR_AND_ADJ)
             pillarNodes.add(nodeAccess, adjNode);
 
         return pillarNodes;
+    }
+
+    static int getPointListLength(int pillarNodes, FetchMode mode) {
+        switch (mode) {
+            case TOWER_ONLY:
+                return 2;
+            case PILLAR_ONLY:
+                return pillarNodes;
+            case BASE_AND_PILLAR:
+            case PILLAR_AND_ADJ:
+                return pillarNodes + 1;
+            case ALL:
+                return pillarNodes + 2;
+        }
+        throw new IllegalArgumentException("Mode isn't handled " + mode);
     }
 
     private void setName(long edgePointer, String name) {
@@ -1021,11 +1066,9 @@ class BaseGraph implements Graph {
          * @return false if the edge has not a node equal to expectedAdjNode
          */
         final boolean init(int tmpEdgeId, int expectedAdjNode) {
+            if (!EdgeIterator.Edge.isValid(tmpEdgeId))
+                throw new IllegalArgumentException("fetching the edge requires a valid edgeId but was " + tmpEdgeId);
             setEdgeId(tmpEdgeId);
-            if (!EdgeIterator.Edge.isValid(edgeId))
-                throw new IllegalArgumentException("fetching the edge requires a valid edgeId but was " + edgeId);
-
-            selectEdgeAccess();
             edgePointer = edgeAccess.toPointer(tmpEdgeId);
             baseNode = edgeAccess.getNodeA(edgePointer);
             adjNode = edgeAccess.getNodeB(edgePointer);
@@ -1058,32 +1101,31 @@ class BaseGraph implements Graph {
             return this;
         }
 
-        protected void selectEdgeAccess() {
-        }
-
         @Override
         public final boolean next() {
             while (true) {
                 if (!EdgeIterator.Edge.isValid(nextEdgeId))
                     return false;
-
-                selectEdgeAccess();
-                edgePointer = edgeAccess.toPointer(nextEdgeId);
-                edgeId = nextEdgeId;
-                int nodeA = edgeAccess.getNodeA(edgePointer);
-                boolean baseNodeIsNodeA = baseNode == nodeA;
-                adjNode = baseNodeIsNodeA ? edgeAccess.getNodeB(edgePointer) : nodeA;
-                reverse = !baseNodeIsNodeA;
-                freshFlags = false;
-
-                // position to next edge
-                nextEdgeId = baseNodeIsNodeA ? edgeAccess.getLinkA(edgePointer) : edgeAccess.getLinkB(edgePointer);
-                assert nextEdgeId != edgeId : ("endless loop detected for base node: " + baseNode + ", adj node: " + adjNode
-                        + ", edge pointer: " + edgePointer + ", edge: " + edgeId);
-
-                if (filter.accept(this))
+                goToNext();
+                if (filter.accept(this)) {
                     return true;
+                }
             }
+        }
+
+        void goToNext() {
+            edgePointer = edgeAccess.toPointer(nextEdgeId);
+            edgeId = nextEdgeId;
+            int nodeA = edgeAccess.getNodeA(edgePointer);
+            boolean baseNodeIsNodeA = baseNode == nodeA;
+            adjNode = baseNodeIsNodeA ? edgeAccess.getNodeB(edgePointer) : nodeA;
+            reverse = !baseNodeIsNodeA;
+            freshFlags = false;
+
+            // position to next edge
+            nextEdgeId = baseNodeIsNodeA ? edgeAccess.getLinkA(edgePointer) : edgeAccess.getLinkB(edgePointer);
+            assert nextEdgeId != edgeId : ("endless loop detected for base node: " + baseNode + ", adj node: " + adjNode
+                    + ", edge pointer: " + edgePointer + ", edge: " + edgeId);
         }
 
         @Override
@@ -1091,15 +1133,12 @@ class BaseGraph implements Graph {
             if (edgeId == nextEdgeId || !EdgeIterator.Edge.isValid(edgeId))
                 throw new IllegalStateException("call next before detaching or setEdgeId (edgeId:" + edgeId + " vs. next " + nextEdgeId + ")");
 
-            EdgeIterable iter = edgeAccess.createSingleEdge(filter);
-            boolean ret;
+            EdgeIteratorState iter = edgeAccess.getEdgeProps(edgeId, reverseArg ? baseNode : adjNode, filter);
+            assert iter != null;
             if (reverseArg) {
-                ret = iter.init(edgeId, baseNode);
                 // for #162
-                iter.reverse = !reverse;
-            } else
-                ret = iter.init(edgeId, adjNode);
-            assert ret;
+                ((EdgeIterable) iter).reverse = !reverse;
+            }
             return iter;
         }
     }
@@ -1126,7 +1165,7 @@ class BaseGraph implements Graph {
             while (true) {
                 edgeId++;
                 edgePointer = (long) edgeId * edgeAccess.getEntryBytes();
-                if (!checkRange())
+                if (edgeId >= baseGraph.edgeCount)
                     return false;
 
                 adjNode = edgeAccess.getNodeB(edgePointer);
@@ -1139,10 +1178,6 @@ class BaseGraph implements Graph {
                 reverse = false;
                 return true;
             }
-        }
-
-        protected boolean checkRange() {
-            return edgeId < baseGraph.edgeCount;
         }
 
         @Override
@@ -1179,14 +1214,14 @@ class BaseGraph implements Graph {
         boolean reverse = false;
         boolean freshFlags;
         int edgeId = -1;
-        private final IntsRef baseIntsRef;
+        private final IntsRef edgeFlags;
         int chFlags;
 
         public CommonEdgeIterator(long edgePointer, EdgeAccess edgeAccess, BaseGraph baseGraph) {
             this.edgePointer = edgePointer;
             this.edgeAccess = edgeAccess;
             this.baseGraph = baseGraph;
-            this.baseIntsRef = new IntsRef(baseGraph.intsForFlags);
+            this.edgeFlags = new IntsRef(baseGraph.intsForFlags);
         }
 
         @Override
@@ -1213,10 +1248,10 @@ class BaseGraph implements Graph {
         @Override
         public IntsRef getFlags() {
             if (!freshFlags) {
-                edgeAccess.readFlags(edgePointer, baseIntsRef);
+                edgeAccess.readFlags(edgePointer, edgeFlags);
                 freshFlags = true;
             }
-            return baseIntsRef;
+            return edgeFlags;
         }
 
         @Override
@@ -1224,7 +1259,7 @@ class BaseGraph implements Graph {
             assert edgeId < baseGraph.edgeCount : "must be edge but was shortcut: " + edgeId + " >= " + baseGraph.edgeCount + ". Use setFlagsAndWeight";
             edgeAccess.writeFlags(edgePointer, edgeFlags);
             for (int i = 0; i < edgeFlags.ints.length; i++) {
-                baseIntsRef.ints[i] = edgeFlags.ints[i];
+                this.edgeFlags.ints[i] = edgeFlags.ints[i];
             }
             freshFlags = true;
             return this;
@@ -1338,7 +1373,7 @@ class BaseGraph implements Graph {
         }
 
         @Override
-        public PointList fetchWayGeometry(int mode) {
+        public PointList fetchWayGeometry(FetchMode mode) {
             return baseGraph.fetchWayGeometry_(edgePointer, reverse, mode, getBaseNode(), getAdjNode());
         }
 
