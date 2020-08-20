@@ -24,19 +24,9 @@ import com.graphhopper.util.Helper;
  */
 public enum Surface {
     OTHER("other"),
-    ASPHALT("asphalt"),
-    COBBLESTONE("cobblestone"),
-    COMPACTED("compacted"),
-    CONCRETE("concrete"),
-    DIRT("dirt"),
-    FINE_GRAVEL("fine_gravel"),
-    GRASS("grass"),
-    GRAVEL("gravel"),
-    GROUND("ground"),
-    PAVED("paved"),
-    PAVING_STONES("paving_stones"),
-    SAND("sand"),
-    UNPAVED("unpaved");
+    PAVED("paved"), ASPHALT("asphalt"), CONCRETE("concrete"), PAVING_STONES("paving_stones"), COBBLESTONE("cobblestone"),
+    UNPAVED("unpaved"), COMPACTED("compacted"), FINE_GRAVEL("fine_gravel"), GRAVEL("gravel"),
+    GROUND("ground"), DIRT("dirt"), GRASS("grass"), SAND("sand");
 
     public static final String KEY = "surface";
 
